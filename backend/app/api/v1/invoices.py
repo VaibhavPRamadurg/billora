@@ -1,5 +1,6 @@
 """Protected invoice generation and retrieval endpoints."""
 
+import re
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
@@ -17,6 +18,7 @@ from app.services.billing.invoices import (
     generate_initial_invoice,
     get_invoice_with_items,
 )
+from app.services.billing.pdf import render_invoice_pdf
 
 
 router = APIRouter(tags=["invoices"])
@@ -95,3 +97,31 @@ def get_invoice(
     ):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invoice not found")
     return invoice
+
+
+@router.get(
+    "/invoices/{invoice_id}/pdf",
+    response_class=Response,
+    responses={200: {"content": {"application/pdf": {}}}},
+)
+def export_invoice_pdf(
+    invoice_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> Response:
+    """Download a PDF rendered from persisted invoice and line-item snapshots."""
+    invoice = get_invoice_with_items(db, invoice_id)
+    if invoice is None or (
+        current_user.role == UserRole.CUSTOMER and invoice.customer_id != current_user.id
+    ):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invoice not found")
+    customer = db.get(User, invoice.customer_id)
+    if customer is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invoice not found")
+    safe_invoice_number = re.sub(r"[^A-Za-z0-9._-]", "_", invoice.invoice_number)
+    filename = f"invoice-{safe_invoice_number}.pdf"
+    return Response(
+        content=render_invoice_pdf(invoice, customer),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )

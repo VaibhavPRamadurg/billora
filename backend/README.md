@@ -42,6 +42,14 @@ Run the test suite without live Supabase credentials:
 pytest
 ```
 
+## Invoice PDF export
+
+Authenticated users can download an invoice PDF at
+`GET /api/v1/invoices/{invoice_id}/pdf`. The server renders the PDF in memory from
+persisted invoice-item snapshots; it does not upload a file to Supabase Storage or alter
+invoice, payment, subscription, or billing records. Customers can export only their own
+invoices, while administrators and staff can export any invoice.
+
 ## Create the initial administrator
 
 After the approved migrations have been applied, a trusted local operator can create

@@ -255,6 +255,7 @@ change its status or `next_billing_at`.
 | `POST` | `/api/v1/subscriptions/{subscription_id}/invoices/generate` | Admin, staff |
 | `GET` | `/api/v1/invoices` | Authenticated users; customers see only their own |
 | `GET` | `/api/v1/invoices/{invoice_id}` | Authenticated users; customers see only their own |
+| `GET` | `/api/v1/invoices/{invoice_id}/pdf` | Authenticated users; customers see only their own |
 
 An optional, explicit discount code can be supplied by an administrator or staff
 member. Discounts are applied before the tax rule selected for the configured MVP
@@ -271,6 +272,12 @@ period returns the existing invoice with HTTP 200. An overlapping, non-identical
 returns HTTP 409. Only active subscriptions with non-null ordered period boundaries and
 at least one snapshot item may be invoiced. No payment, PDF, lifecycle transition, or
 recurring scheduling action occurs.
+
+`GET /api/v1/invoices/{invoice_id}/pdf` returns an in-memory downloadable
+`application/pdf` document. It is rendered from persisted invoice and invoice-item
+snapshots and includes invoice details, the customer's stored email, line items,
+discounts, tax, totals, amount paid, and outstanding balance. Customer access to a
+different customer's PDF returns HTTP 404, matching invoice retrieval behavior.
 
 ## Payments
 

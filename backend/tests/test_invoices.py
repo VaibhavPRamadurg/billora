@@ -245,6 +245,62 @@ def test_invoice_visibility_and_generation_permissions(invoices: InvoiceHarness)
     assert invoices.client.get(f"/api/v1/invoices/{invoice_id}", headers=invoices.headers(invoices.other_customer)).status_code == 404
 
 
+def test_invoice_pdf_export_uses_persisted_snapshots_and_enforces_visibility(invoices: InvoiceHarness) -> None:
+    invoice_id = _generate_invoice(invoices)
+    invoice = invoices.session.get(Invoice, UUID(invoice_id))
+    assert invoice is not None
+
+    customer_pdf = invoices.client.get(
+        f"/api/v1/invoices/{invoice_id}/pdf", headers=invoices.headers(invoices.customer)
+    )
+    admin_pdf = invoices.client.get(
+        f"/api/v1/invoices/{invoice_id}/pdf", headers=invoices.headers(invoices.admin)
+    )
+    other_customer_pdf = invoices.client.get(
+        f"/api/v1/invoices/{invoice_id}/pdf", headers=invoices.headers(invoices.other_customer)
+    )
+    missing_pdf = invoices.client.get(f"/api/v1/invoices/{uuid4()}/pdf", headers=invoices.headers())
+
+    assert customer_pdf.status_code == 200
+    assert customer_pdf.headers["content-type"].startswith("application/pdf")
+    assert customer_pdf.headers["content-disposition"].startswith("attachment; filename=\"invoice-INV-")
+    assert customer_pdf.content.startswith(b"%PDF-")
+    assert invoice.invoice_number.encode() in customer_pdf.content
+    assert b"invoice-customer@example.com" in customer_pdf.content
+    assert b"Outstanding balance" in customer_pdf.content
+    assert b"INR 200.00" in customer_pdf.content
+    assert admin_pdf.status_code == 200
+    assert other_customer_pdf.status_code == 404
+    assert missing_pdf.status_code == 404
+
+
+def test_invoice_pdf_supports_long_multi_page_item_tables(invoices: InvoiceHarness) -> None:
+    invoice_id = _generate_invoice(invoices)
+    invoice = invoices.session.get(Invoice, UUID(invoice_id))
+    assert invoice is not None
+    invoice.items.extend(
+        InvoiceItem(
+            id=uuid4(),
+            description=f"Long retained snapshot description {position}: " + "service detail " * 16,
+            quantity=Decimal("1.000"),
+            unit_price=Decimal("1.00"),
+            tax_rate=Decimal("0"),
+            tax_amount=Decimal("0.00"),
+            discount_amount=Decimal("0.00"),
+            line_total=Decimal("1.00"),
+            position=position,
+        )
+        for position in range(1, 38)
+    )
+    invoices.session.commit()
+
+    response = invoices.client.get(f"/api/v1/invoices/{invoice_id}/pdf", headers=invoices.headers())
+
+    assert response.status_code == 200
+    assert response.content.startswith(b"%PDF-")
+    assert response.content.count(b"/Type /Page") >= 2
+
+
 def test_generation_rolls_back_when_the_database_rejects_the_write(invoices: InvoiceHarness, monkeypatch) -> None:
     def reject_commit() -> None:
         raise IntegrityError("insert", {}, Exception("constraint violation"))
