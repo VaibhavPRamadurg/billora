@@ -187,3 +187,58 @@ to its selected product. Duplicate positions and duplicate product/variant assoc
 return HTTP 409. Plans referenced by subscriptions cannot be deleted and should instead
 be deactivated. Existing association deletion follows the schema's `SET NULL` behavior
 for downstream subscription-item references.
+
+## Subscription lifecycle
+
+Subscription endpoints require a Bearer token. Admins and staff create, update, and
+transition subscriptions; customers can list and retrieve only their own subscriptions.
+Customer-specific quotation data is stored on the subscription record for the MVP.
+
+| Method | Endpoint | Purpose |
+| --- | --- | --- |
+| `POST` | `/api/v1/subscriptions` | Create a draft subscription |
+| `GET` | `/api/v1/subscriptions` | List visible subscriptions |
+| `GET` | `/api/v1/subscriptions/{subscription_id}` | Retrieve a visible subscription |
+| `PATCH` | `/api/v1/subscriptions/{subscription_id}` | Update a draft only |
+| `POST` | `/api/v1/subscriptions/{subscription_id}/quotation` | Draft → quotation |
+| `POST` | `/api/v1/subscriptions/{subscription_id}/confirm` | Quotation → confirmed |
+| `POST` | `/api/v1/subscriptions/{subscription_id}/activate` | Confirmed → active |
+| `POST` | `/api/v1/subscriptions/{subscription_id}/pause` | Active → paused |
+| `POST` | `/api/v1/subscriptions/{subscription_id}/resume` | Paused → active |
+| `POST` | `/api/v1/subscriptions/{subscription_id}/close` | Active/paused → closed |
+| `POST` | `/api/v1/subscriptions/{subscription_id}/cancel` | Active/paused → cancelled |
+| `POST` | `/api/v1/subscriptions/{subscription_id}/expire` | Active/paused → expired |
+
+Create a draft from an active plan and its plan-product associations. Values are copied
+into immutable subscription-item snapshots; no billing calculation is performed.
+
+```json
+{
+  "customer_id": "8fdf9e75-cf5d-4f01-a1e1-8ae86af5d9ef",
+  "plan_id": "b7c5883c-2948-4bc4-9ec7-ea9b399cdc1f",
+  "items": [
+    {
+      "plan_product_id": "eb892c57-f1f0-48ee-a37e-2b6cdfc967c5",
+      "quantity": "1.000",
+      "unit_price": "20.00"
+    }
+  ]
+}
+```
+
+Activation requires ordered, timezone-aware UTC billing boundaries:
+
+```json
+{
+  "current_period_start": "2026-01-01T00:00:00Z",
+  "current_period_end": "2026-02-01T00:00:00Z"
+}
+```
+
+Allowed transitions are `draft → quotation → confirmed → active`; `active ↔ paused`;
+and `active` or `paused` to `closed`, `cancelled`, or `expired`. Terminal states cannot
+transition further. Invalid transitions return HTTP 409. Expiration is an explicit
+admin/staff operation now; a future scheduler may call the same transition after its
+own eligibility checks. These endpoints do not generate invoices, charge payments, or
+invoke Member 2's billing engine. Pre-activation subscriptions have null period bounds
+and must not be selected for billing.

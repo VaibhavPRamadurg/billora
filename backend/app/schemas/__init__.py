@@ -21,9 +21,19 @@ from app.schemas.plans import (
     PlanResponse,
     PlanUpdate,
 )
+from app.schemas.subscriptions import (
+    ActivationRequest,
+    SubscriptionCreate,
+    SubscriptionDraftUpdate,
+    SubscriptionItemInput,
+    SubscriptionItemResponse,
+    SubscriptionPage,
+    SubscriptionResponse,
+)
 
 __all__ = [
     "AccessTokenResponse",
+    "ActivationRequest",
     "LoginRequest",
     "PlanCreate",
     "PlanPage",
@@ -42,5 +52,11 @@ __all__ = [
     "ProductVariantResponse",
     "ProductVariantUpdate",
     "RegisterRequest",
+    "SubscriptionCreate",
+    "SubscriptionDraftUpdate",
+    "SubscriptionItemInput",
+    "SubscriptionItemResponse",
+    "SubscriptionPage",
+    "SubscriptionResponse",
     "UserResponse",
 ]
