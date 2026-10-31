@@ -38,6 +38,25 @@ Run the test suite without live Supabase credentials:
 pytest
 ```
 
+## Create the initial administrator
+
+After the approved migrations have been applied, a trusted local operator can create
+the first administrator. The command reads the password (and its confirmation) from
+the terminal; it never accepts a password argument and will not write unless
+`--confirm` is supplied:
+
+```bash
+cd backend
+source .venv/bin/activate
+python scripts/bootstrap_admin.py --email admin@example.com --confirm
+```
+
+Omit `--email` to enter it interactively. The command applies the same email
+normalization and password policy as registration, rejects an existing email without
+changing its role, and uses `backend/.env` for the server-side Supabase connection.
+Run it only from a secured operator machine; never expose the database URL, password,
+or this capability to the frontend.
+
 ## Alembic migrations
 
 Alembic reads `DATABASE_URL` from `backend/.env` through the same Pydantic settings
