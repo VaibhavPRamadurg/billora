@@ -8,8 +8,13 @@ from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 from app.models import UserRole
 
 
-class RegisterRequest(BaseModel):
-    """Public registration input. Public clients cannot choose an account role."""
+def normalize_email(value: EmailStr) -> str:
+    """Return Billora's consistent case-insensitive email representation."""
+    return str(value).casefold()
+
+
+class EmailPasswordRequest(BaseModel):
+    """Shared validated credentials input for registration and login."""
 
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
@@ -18,9 +23,16 @@ class RegisterRequest(BaseModel):
 
     @field_validator("email")
     @classmethod
-    def normalize_email(cls, value: EmailStr) -> str:
-        """Store one consistent, case-insensitive representation of each email."""
-        return str(value).casefold()
+    def normalize_email_address(cls, value: EmailStr) -> str:
+        return normalize_email(value)
+
+
+class RegisterRequest(EmailPasswordRequest):
+    """Public registration input. Public clients cannot choose an account role."""
+
+
+class LoginRequest(EmailPasswordRequest):
+    """Credentials used to issue an access token."""
 
 
 class UserResponse(BaseModel):
@@ -34,3 +46,10 @@ class UserResponse(BaseModel):
     is_active: bool
     created_at: datetime
     updated_at: datetime
+
+
+class AccessTokenResponse(BaseModel):
+    """Bearer access token response returned after a successful login."""
+
+    access_token: str
+    token_type: str = "bearer"

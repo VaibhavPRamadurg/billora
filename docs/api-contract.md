@@ -50,3 +50,36 @@ Successful responses return HTTP 201 and never include password hashes:
 Duplicate normalized emails return HTTP 409. Invalid email addresses, passwords shorter
 than eight characters, missing required fields, and role fields submitted by public
 clients return HTTP 422.
+
+## Login and authenticated profile
+
+`POST /api/v1/auth/login` accepts the same normalized email and password fields as
+registration. Invalid credentials and inactive accounts return HTTP 401.
+
+```json
+{
+  "email": "customer@example.com",
+  "password": "at-least-eight-characters"
+}
+```
+
+Successful login response:
+
+```json
+{
+  "access_token": "<signed-jwt>",
+  "token_type": "bearer"
+}
+```
+
+Use the token with protected endpoints, including `GET /api/v1/auth/me`:
+
+```http
+Authorization: Bearer <signed-jwt>
+```
+
+Tokens include the user UUID subject (`sub`), issued-at (`iat`), and expiration (`exp`)
+claims and use `JWT_SECRET_KEY`, `JWT_ALGORITHM`, and `ACCESS_TOKEN_EXPIRE_MINUTES`
+from the backend environment. Missing, invalid, expired, inactive-user, or
+nonexistent-user tokens return HTTP 401. Authenticated users lacking a required role
+return HTTP 403.
