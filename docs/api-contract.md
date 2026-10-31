@@ -271,3 +271,37 @@ period returns the existing invoice with HTTP 200. An overlapping, non-identical
 returns HTTP 409. Only active subscriptions with non-null ordered period boundaries and
 at least one snapshot item may be invoiced. No payment, PDF, lifecycle transition, or
 recurring scheduling action occurs.
+
+## Payments
+
+Payments are manual, immutable records for the MVP; no gateway integration, refund, or
+payment-update endpoint exists. Admins and staff can record them, while customers can
+only view payments for invoices they own.
+
+| Method | Endpoint | Access |
+| --- | --- | --- |
+| `POST` | `/api/v1/invoices/{invoice_id}/payments` | Admin, staff |
+| `GET` | `/api/v1/invoices/{invoice_id}/payments` | Authenticated invoice owner or manager |
+| `GET` | `/api/v1/payments/{payment_id}` | Authenticated invoice owner or manager |
+
+```json
+{
+  "provider": "manual",
+  "provider_reference": "RECEIPT-2026-0001",
+  "currency": "INR",
+  "amount": "500.00",
+  "status": "succeeded"
+}
+```
+
+`provider_reference` is required for idempotency. Repeating the same provider/reference
+and payment fields returns the original payment with HTTP 200; reusing it with different
+data returns HTTP 409. Payment currency must match the invoice and the amount must be
+positive and no greater than the current outstanding balance.
+
+Only an explicit `succeeded` record is settled: it increases `invoice.amount_paid` and
+sets the invoice to `partially_paid` or `paid`. `pending` and `failed` records have an
+applied amount of zero and do not change the invoice balance. `refunded` is rejected in
+this MVP because no refund allocation workflow exists. Draft, confirmed, and
+partially-paid invoices are payable; paid and cancelled invoices are not. Payment
+responses include the current `outstanding_balance`.

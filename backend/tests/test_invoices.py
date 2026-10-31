@@ -2,7 +2,7 @@
 
 from datetime import datetime, timezone
 from decimal import Decimal
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from fastapi.testclient import TestClient
@@ -23,6 +23,8 @@ from app.models import (
     DiscountType,
     Invoice,
     InvoiceItem,
+    InvoiceStatus,
+    Payment,
     Plan,
     Product,
     ProductVariant,
@@ -46,6 +48,7 @@ INVOICE_TABLES = (
     DiscountRule.__table__,
     Invoice.__table__,
     InvoiceItem.__table__,
+    Payment.__table__,
     DiscountRedemption.__table__,
 )
 
@@ -251,3 +254,162 @@ def test_generation_rolls_back_when_the_database_rejects_the_write(invoices: Inv
 
     assert response.status_code == 409
     assert invoices.session.scalars(select(Invoice)).all() == []
+
+
+def _generate_invoice(invoices: InvoiceHarness) -> str:
+    response = invoices.client.post(invoices.generation_url, headers=invoices.headers())
+    assert response.status_code == 201
+    return response.json()["id"]
+
+
+def _payment_payload(reference: str, amount: str, payment_status: str = "succeeded") -> dict[str, str]:
+    return {
+        "provider": "manual",
+        "provider_reference": reference,
+        "currency": "INR",
+        "amount": amount,
+        "status": payment_status,
+    }
+
+
+def test_full_manual_payment_updates_invoice_balance_and_status(invoices: InvoiceHarness) -> None:
+    invoice_id = _generate_invoice(invoices)
+
+    response = invoices.client.post(
+        f"/api/v1/invoices/{invoice_id}/payments",
+        headers=invoices.headers(),
+        json=_payment_payload("receipt-full", "200.00"),
+    )
+
+    assert response.status_code == 201
+    assert response.json()["status"] == "succeeded"
+    assert response.json()["applied_amount"] == "200.00"
+    assert response.json()["outstanding_balance"] == "0.00"
+    invoice = invoices.session.get(Invoice, UUID(invoice_id))
+    assert invoice is not None
+    assert invoice.amount_paid == Decimal("200.00")
+    assert invoice.status.value == "paid"
+
+
+def test_partial_payments_are_decimal_safe_idempotent_and_cannot_overpay(invoices: InvoiceHarness) -> None:
+    invoice_id = _generate_invoice(invoices)
+    first = invoices.client.post(
+        f"/api/v1/invoices/{invoice_id}/payments",
+        headers=invoices.headers(),
+        json=_payment_payload("receipt-1", "33.33"),
+    )
+    second = invoices.client.post(
+        f"/api/v1/invoices/{invoice_id}/payments",
+        headers=invoices.headers(),
+        json=_payment_payload("receipt-2", "66.67"),
+    )
+    duplicate = invoices.client.post(
+        f"/api/v1/invoices/{invoice_id}/payments",
+        headers=invoices.headers(),
+        json=_payment_payload("receipt-1", "33.33"),
+    )
+    overpayment = invoices.client.post(
+        f"/api/v1/invoices/{invoice_id}/payments",
+        headers=invoices.headers(),
+        json=_payment_payload("receipt-over", "100.01"),
+    )
+
+    assert first.status_code == 201
+    assert first.json()["outstanding_balance"] == "166.67"
+    assert second.status_code == 201
+    assert second.json()["outstanding_balance"] == "100.00"
+    assert duplicate.status_code == 200
+    assert duplicate.json()["id"] == first.json()["id"]
+    assert overpayment.status_code == 409
+    invoice = invoices.session.get(Invoice, UUID(invoice_id))
+    assert invoice is not None
+    assert invoice.amount_paid == Decimal("100.00")
+    assert invoice.status.value == "partially_paid"
+    assert len(invoices.session.scalars(select(Payment)).all()) == 2
+
+
+def test_conflicting_duplicate_reference_and_invalid_payment_inputs_are_rejected(invoices: InvoiceHarness) -> None:
+    invoice_id = _generate_invoice(invoices)
+    endpoint = f"/api/v1/invoices/{invoice_id}/payments"
+    assert invoices.client.post(endpoint, headers=invoices.headers(), json=_payment_payload("unique-ref", "10.00")).status_code == 201
+
+    conflicting = invoices.client.post(endpoint, headers=invoices.headers(), json=_payment_payload("unique-ref", "20.00"))
+    zero = invoices.client.post(endpoint, headers=invoices.headers(), json=_payment_payload("zero", "0.00"))
+    refunded = invoices.client.post(endpoint, headers=invoices.headers(), json=_payment_payload("refund", "10.00", "refunded"))
+
+    assert conflicting.status_code == 409
+    assert zero.status_code == 422
+    assert refunded.status_code == 422
+
+
+def test_competing_payments_after_a_partial_payment_cannot_exceed_remaining_balance(invoices: InvoiceHarness) -> None:
+    invoice_id = _generate_invoice(invoices)
+    endpoint = f"/api/v1/invoices/{invoice_id}/payments"
+    assert invoices.client.post(endpoint, headers=invoices.headers(), json=_payment_payload("first", "150.00")).status_code == 201
+
+    accepted = invoices.client.post(endpoint, headers=invoices.headers(), json=_payment_payload("second", "50.00"))
+    rejected = invoices.client.post(endpoint, headers=invoices.headers(), json=_payment_payload("third", "50.00"))
+
+    assert accepted.status_code == 201
+    assert rejected.status_code == 422
+
+
+def test_pending_and_failed_payments_do_not_change_invoice_balance(invoices: InvoiceHarness) -> None:
+    invoice_id = _generate_invoice(invoices)
+    for reference, payment_status in (("pending-1", "pending"), ("failed-1", "failed")):
+        response = invoices.client.post(
+            f"/api/v1/invoices/{invoice_id}/payments",
+            headers=invoices.headers(),
+            json=_payment_payload(reference, "50.00", payment_status),
+        )
+        assert response.status_code == 201
+        assert response.json()["applied_amount"] == "0.00"
+        assert response.json()["outstanding_balance"] == "200.00"
+    invoice = invoices.session.get(Invoice, UUID(invoice_id))
+    assert invoice is not None
+    assert invoice.amount_paid == Decimal("0.00")
+    assert invoice.status.value == "draft"
+
+
+def test_payment_permissions_visibility_and_nonpayable_invoice(invoices: InvoiceHarness) -> None:
+    invoice_id = _generate_invoice(invoices)
+    endpoint = f"/api/v1/invoices/{invoice_id}/payments"
+    assert invoices.client.post(
+        endpoint,
+        headers=invoices.headers(invoices.customer),
+        json=_payment_payload("customer-write", "10.00"),
+    ).status_code == 403
+
+    created = invoices.client.post(endpoint, headers=invoices.headers(), json=_payment_payload("receipt-visible", "10.00"))
+    payment_id = created.json()["id"]
+    assert invoices.client.get(endpoint, headers=invoices.headers(invoices.customer)).status_code == 200
+    assert invoices.client.get(f"/api/v1/payments/{payment_id}", headers=invoices.headers(invoices.customer)).status_code == 200
+    assert invoices.client.get(f"/api/v1/payments/{payment_id}", headers=invoices.headers(invoices.other_customer)).status_code == 404
+
+    invoice = invoices.session.get(Invoice, UUID(invoice_id))
+    assert invoice is not None
+    invoice.status = InvoiceStatus.CANCELLED
+    invoices.session.commit()
+    assert invoices.client.post(endpoint, headers=invoices.headers(), json=_payment_payload("cancelled", "10.00")).status_code == 422
+
+
+def test_payment_transaction_rollback_leaves_invoice_balance_unchanged(invoices: InvoiceHarness, monkeypatch) -> None:
+    invoice_id = _generate_invoice(invoices)
+    original_commit = invoices.session.commit
+
+    def reject_commit() -> None:
+        raise IntegrityError("insert", {}, Exception("constraint violation"))
+
+    monkeypatch.setattr(invoices.session, "commit", reject_commit)
+    response = invoices.client.post(
+        f"/api/v1/invoices/{invoice_id}/payments",
+        headers=invoices.headers(),
+        json=_payment_payload("rollback", "10.00"),
+    )
+
+    assert response.status_code == 409
+    monkeypatch.setattr(invoices.session, "commit", original_commit)
+    invoice = invoices.session.get(Invoice, UUID(invoice_id))
+    assert invoice is not None
+    assert invoice.amount_paid == Decimal("0.00")
+    assert invoices.session.scalars(select(Payment)).all() == []
