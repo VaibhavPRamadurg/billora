@@ -48,7 +48,16 @@ def test_all_shared_tables_are_registered_with_base_metadata() -> None:
 
 def test_shared_enum_values_match_the_business_contract() -> None:
     assert {role.value for role in UserRole} == {"admin", "staff", "customer"}
-    assert {state.value for state in SubscriptionStatus} == {"active", "paused", "cancelled", "expired"}
+    assert {state.value for state in SubscriptionStatus} == {
+        "draft",
+        "quotation",
+        "confirmed",
+        "active",
+        "paused",
+        "closed",
+        "cancelled",
+        "expired",
+    }
     assert {state.value for state in InvoiceStatus} == {
         "draft",
         "confirmed",
@@ -63,6 +72,22 @@ def test_money_and_timestamps_use_exact_aware_types() -> None:
     assert Invoice.__table__.c.total.type.scale == 2
     assert isinstance(User.__table__.c.created_at.type, DateTime)
     assert User.__table__.c.created_at.type.timezone is True
+
+
+def test_subscription_lifecycle_metadata_supports_pre_activation_periods() -> None:
+    subscription = Subscription.__table__
+
+    assert subscription.c.status.default.arg is SubscriptionStatus.DRAFT
+    assert subscription.c.status.server_default.arg == "draft"
+    assert subscription.c.current_period_start.nullable is True
+    assert subscription.c.current_period_end.nullable is True
+    assert any(
+        isinstance(constraint, CheckConstraint)
+        and constraint.name == "ck_subscriptions_period_order"
+        and "quotation" in str(constraint.sqltext)
+        and "current_period_start < current_period_end" in str(constraint.sqltext)
+        for constraint in subscription.constraints
+    )
 
 
 def test_invoice_period_constraints_preserve_idempotency_and_non_overlap() -> None:

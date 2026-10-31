@@ -55,8 +55,12 @@ class BillingFrequency(str, Enum):
 
 
 class SubscriptionStatus(str, Enum):
+    DRAFT = "draft"
+    QUOTATION = "quotation"
+    CONFIRMED = "confirmed"
     ACTIVE = "active"
     PAUSED = "paused"
+    CLOSED = "closed"
     CANCELLED = "cancelled"
     EXPIRED = "expired"
 
@@ -226,7 +230,20 @@ class PlanProduct(Base):
 class Subscription(TimestampMixin, Base):
     __tablename__ = "subscriptions"
     __table_args__ = (
-        CheckConstraint("current_period_start < current_period_end", name="ck_subscriptions_period_order"),
+        CheckConstraint(
+            """
+            (
+                (status IN ('draft', 'quotation', 'confirmed')
+                    AND current_period_start IS NULL
+                    AND current_period_end IS NULL)
+                OR
+                (current_period_start IS NOT NULL
+                    AND current_period_end IS NOT NULL
+                    AND current_period_start < current_period_end)
+            )
+            """,
+            name="ck_subscriptions_period_order",
+        ),
         Index("ix_subscriptions_status_next_billing", "status", "next_billing_at"),
         Index("ix_subscriptions_customer_status", "customer_id", "status"),
     )
@@ -241,7 +258,8 @@ class Subscription(TimestampMixin, Base):
     status: Mapped[SubscriptionStatus] = mapped_column(
         SAEnum(SubscriptionStatus, name="subscription_status", values_callable=enum_values),
         nullable=False,
-        default=SubscriptionStatus.ACTIVE,
+        default=SubscriptionStatus.DRAFT,
+        server_default=SubscriptionStatus.DRAFT.value,
     )
     billing_frequency: Mapped[BillingFrequency] = mapped_column(
         SAEnum(
@@ -253,8 +271,8 @@ class Subscription(TimestampMixin, Base):
     )
     currency: Mapped[str] = mapped_column(String(3), nullable=False)
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
-    current_period_start: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    current_period_end: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    current_period_start: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    current_period_end: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     next_billing_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
     paused_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     resume_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

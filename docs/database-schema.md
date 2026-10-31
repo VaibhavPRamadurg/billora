@@ -24,7 +24,7 @@ This document defines Billora's Step 2A SQLAlchemy metadata. It does not create 
 
 | Table | Key columns | Relationships and constraints |
 | --- | --- | --- |
-| `subscriptions` | `customer_id`, `plan_id`, `status`, frequency snapshot, currency, current-period bounds, `next_billing_at`, pause/resume/cancel fields | Indexed by customer/status and status/next billing time. A period must have a start before its end. `paused_at`, `resume_at`, `cancel_at`, `cancel_at_period_end`, and `auto_renew` support the lifecycle. Paused subscriptions are excluded by the billing worker, not a model hook. |
+| `subscriptions` | `customer_id`, `plan_id`, `status`, frequency snapshot, currency, optional current-period bounds, `next_billing_at`, pause/resume/cancel fields | Indexed by customer/status and status/next billing time. New subscriptions default to `draft`. Pre-activation states (`draft`, `quotation`, `confirmed`) have no billing period; active/paused and all period-bearing records require both ordered UTC period timestamps. `paused_at`, `resume_at`, `cancel_at`, `cancel_at_period_end`, and `auto_renew` support the lifecycle. Paused subscriptions are excluded by the billing worker, not a model hook. |
 | `subscription_items` | `subscription_id`, plan-product reference, product/variant snapshots, quantity, `unit_price` | Non-negative quantity rule. Keeps chosen plan composition and price available even if the plan changes later. |
 | `quotation_templates` | optional `customer_id`, status, currency, `valid_until`, `converted_subscription_id`, `converted_at` | Enables a quote/template to be linked once to its resulting subscription. Status supports draft through converted/cancelled. |
 | `quotation_template_items` | quote ID, product/variant, quantity, unit price, position | Unique item position per quote and positive quantity. |
@@ -47,6 +47,19 @@ This document defines Billora's Step 2A SQLAlchemy metadata. It does not create 
 ## Billing-period guarantee
 
 Invoices represent billing-in-advance periods as `[period_start, period_end)`. The unique constraint protects exact retries; `excl_invoices_subscription_period_overlap` protects overlapping periods. When migrations are added, they must create PostgreSQL's `btree_gist` extension before adding this GiST exclusion constraint, because it uses UUID equality alongside timestamp-range overlap.
+
+## Subscription lifecycle
+
+The persisted subscription workflow is `draft → quotation → confirmed → active → closed`,
+with `paused`, `cancelled`, and `expired` retained as additional operational states.
+Revision `20261031_0002` adds the four missing PostgreSQL enum labels without changing
+existing rows. It makes period boundaries nullable only for pre-activation records and
+sets the database and ORM default to `draft` for new subscriptions. The revision is
+forward-only: PostgreSQL enum labels cannot be safely removed, so its downgrade refuses
+to perform a destructive rollback.
+
+Activation is the point at which application code must assign a valid billing period.
+This schema migration deliberately does not create invoices or invoke billing behavior.
 
 ## Decisions to confirm
 
