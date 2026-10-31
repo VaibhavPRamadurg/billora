@@ -83,3 +83,53 @@ claims and use `JWT_SECRET_KEY`, `JWT_ALGORITHM`, and `ACCESS_TOKEN_EXPIRE_MINUT
 from the backend environment. Missing, invalid, expired, inactive-user, or
 nonexistent-user tokens return HTTP 401. Authenticated users lacking a required role
 return HTTP 403.
+
+## Products and variants
+
+All catalog endpoints require a Bearer token. Admins and staff can create and update;
+only admins can delete. Customers can only retrieve active products and active variants
+of active products. Catalog managers can also inspect inactive records.
+
+| Method | Endpoint | Access |
+| --- | --- | --- |
+| `POST` | `/api/v1/products` | Admin, staff |
+| `GET` | `/api/v1/products` | Authenticated users |
+| `GET` | `/api/v1/products/{product_id}` | Authenticated users |
+| `PATCH` | `/api/v1/products/{product_id}` | Admin, staff |
+| `DELETE` | `/api/v1/products/{product_id}` | Admin |
+| `POST` | `/api/v1/products/{product_id}/variants` | Admin, staff |
+| `GET` | `/api/v1/products/{product_id}/variants` | Authenticated users |
+| `GET` | `/api/v1/products/{product_id}/variants/{variant_id}` | Authenticated users |
+| `PATCH` | `/api/v1/products/{product_id}/variants/{variant_id}` | Admin, staff |
+| `DELETE` | `/api/v1/products/{product_id}/variants/{variant_id}` | Admin |
+
+Create a product:
+
+```json
+{
+  "name": "Premium support",
+  "description": "Priority support coverage",
+  "is_active": true
+}
+```
+
+Create a variant:
+
+```json
+{
+  "name": "Annual",
+  "sku": "SUPPORT-ANNUAL",
+  "attributes": {"term": "annual"},
+  "is_active": true
+}
+```
+
+List endpoints support `offset` and `limit` (1–100). Product listing additionally
+supports `search` and, for admin/staff, `is_active`; variant listing supports
+`is_active` for admin/staff. Product-variant ownership is always validated against the
+URL's `product_id`.
+
+Duplicate variant names within a product and duplicate non-null SKUs return HTTP 409.
+Deleting a product or variant that is referenced by catalog composition or subscription
+records returns HTTP 409 and the caller should deactivate it instead. Missing resources
+return HTTP 404.
