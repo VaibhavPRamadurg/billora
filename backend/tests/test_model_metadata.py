@@ -1,10 +1,26 @@
 """Model metadata tests that never connect to PostgreSQL."""
 
-from sqlalchemy import CheckConstraint, DateTime, Numeric, UniqueConstraint
+from sqlalchemy import CheckConstraint, DateTime, Numeric, UniqueConstraint, insert
+from sqlalchemy.dialects import postgresql
 from sqlalchemy.dialects.postgresql import ExcludeConstraint
 
 from app.db.base import Base
-from app.models import Invoice, InvoiceStatus, SubscriptionStatus, User, UserRole
+from app.models import (
+    BillingFrequency,
+    DiscountRule,
+    DiscountType,
+    Invoice,
+    InvoiceStatus,
+    Payment,
+    PaymentStatus,
+    Plan,
+    QuotationStatus,
+    QuotationTemplate,
+    Subscription,
+    SubscriptionStatus,
+    User,
+    UserRole,
+)
 
 
 def test_all_shared_tables_are_registered_with_base_metadata() -> None:
@@ -68,3 +84,33 @@ def test_invoice_period_constraints_preserve_idempotency_and_non_overlap() -> No
         isinstance(constraint, CheckConstraint) and constraint.name == "ck_invoices_period_order"
         for constraint in constraints
     )
+
+
+def test_postgresql_enum_binds_use_lowercase_database_labels() -> None:
+    """Verify bind processing used by PostgreSQL INSERT statements, without a database."""
+    enum_columns = {
+        User.__table__.c.role: UserRole.CUSTOMER,
+        Plan.__table__.c.billing_frequency: BillingFrequency.MONTHLY,
+        Subscription.__table__.c.status: SubscriptionStatus.PAUSED,
+        Subscription.__table__.c.billing_frequency: BillingFrequency.YEARLY,
+        QuotationTemplate.__table__.c.status: QuotationStatus.ACCEPTED,
+        Invoice.__table__.c.status: InvoiceStatus.PARTIALLY_PAID,
+        Payment.__table__.c.status: PaymentStatus.SUCCEEDED,
+        DiscountRule.__table__.c.discount_type: DiscountType.PERCENTAGE,
+    }
+    dialect = postgresql.dialect()
+
+    for column, enum_member in enum_columns.items():
+        processor = column.type.bind_processor(dialect)
+        assert processor is not None
+        assert processor(enum_member) == enum_member.value
+
+    # The User INSERT's role parameter uses the same PostgreSQL column type processor.
+    compiled_insert = insert(User).values(
+        email="customer@example.com",
+        hashed_password="argon2-hash",
+        role=UserRole.CUSTOMER,
+        is_active=True,
+    ).compile(dialect=dialect)
+    role_processor = User.__table__.c.role.type.bind_processor(dialect)
+    assert role_processor(compiled_insert.params["role"]) == "customer"

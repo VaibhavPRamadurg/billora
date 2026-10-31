@@ -90,6 +90,11 @@ class QuotationStatus(str, Enum):
     CANCELLED = "cancelled"
 
 
+def enum_values(enum_class: type[Enum]) -> list[str]:
+    """Persist enum values, rather than Python member names, in PostgreSQL."""
+    return [member.value for member in enum_class]
+
+
 class TimestampMixin:
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utc_now, nullable=False, index=True
@@ -106,7 +111,10 @@ class User(TimestampMixin, Base):
     email: Mapped[str] = mapped_column(String(320), unique=True, nullable=False, index=True)
     hashed_password: Mapped[str] = mapped_column(String(255), nullable=False)
     role: Mapped[UserRole] = mapped_column(
-        SAEnum(UserRole, name="user_role"), nullable=False, default=UserRole.CUSTOMER, index=True
+        SAEnum(UserRole, name="user_role", values_callable=enum_values),
+        nullable=False,
+        default=UserRole.CUSTOMER,
+        index=True,
     )
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, index=True)
 
@@ -159,7 +167,9 @@ class Plan(TimestampMixin, Base):
     name: Mapped[str] = mapped_column(String(160), unique=True, nullable=False)
     description: Mapped[str | None] = mapped_column(Text)
     billing_frequency: Mapped[BillingFrequency] = mapped_column(
-        SAEnum(BillingFrequency, name="billing_frequency"), nullable=False, index=True
+        SAEnum(BillingFrequency, name="billing_frequency", values_callable=enum_values),
+        nullable=False,
+        index=True,
     )
     currency: Mapped[str] = mapped_column(String(3), nullable=False, default="USD")
     price: Mapped[Decimal] = mapped_column(Money, nullable=False)
@@ -229,10 +239,17 @@ class Subscription(TimestampMixin, Base):
         ForeignKey("plans.id", ondelete="RESTRICT"), nullable=False, index=True
     )
     status: Mapped[SubscriptionStatus] = mapped_column(
-        SAEnum(SubscriptionStatus, name="subscription_status"), nullable=False, default=SubscriptionStatus.ACTIVE
+        SAEnum(SubscriptionStatus, name="subscription_status", values_callable=enum_values),
+        nullable=False,
+        default=SubscriptionStatus.ACTIVE,
     )
     billing_frequency: Mapped[BillingFrequency] = mapped_column(
-        SAEnum(BillingFrequency, name="subscription_billing_frequency"), nullable=False
+        SAEnum(
+            BillingFrequency,
+            name="subscription_billing_frequency",
+            values_callable=enum_values,
+        ),
+        nullable=False,
     )
     currency: Mapped[str] = mapped_column(String(3), nullable=False)
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
@@ -281,7 +298,9 @@ class QuotationTemplate(TimestampMixin, Base):
     customer_id: Mapped[UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), index=True)
     name: Mapped[str] = mapped_column(String(160), nullable=False)
     status: Mapped[QuotationStatus] = mapped_column(
-        SAEnum(QuotationStatus, name="quotation_status"), nullable=False, default=QuotationStatus.DRAFT
+        SAEnum(QuotationStatus, name="quotation_status", values_callable=enum_values),
+        nullable=False,
+        default=QuotationStatus.DRAFT,
     )
     currency: Mapped[str] = mapped_column(String(3), nullable=False, default="USD")
     valid_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
@@ -346,7 +365,9 @@ class Invoice(TimestampMixin, Base):
         ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True
     )
     status: Mapped[InvoiceStatus] = mapped_column(
-        SAEnum(InvoiceStatus, name="invoice_status"), nullable=False, default=InvoiceStatus.DRAFT
+        SAEnum(InvoiceStatus, name="invoice_status", values_callable=enum_values),
+        nullable=False,
+        default=InvoiceStatus.DRAFT,
     )
     currency: Mapped[str] = mapped_column(String(3), nullable=False)
     period_start: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
@@ -415,7 +436,9 @@ class Payment(TimestampMixin, Base):
         ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True
     )
     status: Mapped[PaymentStatus] = mapped_column(
-        SAEnum(PaymentStatus, name="payment_status"), nullable=False, default=PaymentStatus.PENDING
+        SAEnum(PaymentStatus, name="payment_status", values_callable=enum_values),
+        nullable=False,
+        default=PaymentStatus.PENDING,
     )
     provider: Mapped[str] = mapped_column(String(50), nullable=False)
     provider_reference: Mapped[str | None] = mapped_column(String(255))
@@ -475,7 +498,7 @@ class DiscountRule(TimestampMixin, Base):
     code: Mapped[str] = mapped_column(String(64), nullable=False)
     name: Mapped[str] = mapped_column(String(160), nullable=False)
     discount_type: Mapped[DiscountType] = mapped_column(
-        SAEnum(DiscountType, name="discount_type"), nullable=False
+        SAEnum(DiscountType, name="discount_type", values_callable=enum_values), nullable=False
     )
     value: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False)
     max_discount_amount: Mapped[Decimal | None] = mapped_column(Money)
