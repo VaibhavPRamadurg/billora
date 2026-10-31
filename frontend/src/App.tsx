@@ -1,5 +1,9 @@
 
 import Products from "./pages/Products";
+import Plans from "./pages/Plans";
+import Customers from "./pages/Customers";
+import Subscriptions from "./pages/Subscriptions";
+import Quatations from "./pages/Quotations";
 import { useState, type LucideIcon } from "react";
 import {
   LayoutDashboard,
@@ -593,6 +597,14 @@ export default function App() {
               <DashboardContent />
             ) : activePage === "Products" ? (
               <Products />
+            ) : activePage === "Plans" ? (
+              <Plans />
+            ) : activePage === "Customers" ?(
+              <Customers />
+            ) : activePage === "Subscriptions" ?(
+              <Subscriptions />
+            ) : activePage === "Quotations" ? (
+              <Quatations />
             ) : (
               <ComingSoon title={activePage} />
             )}
