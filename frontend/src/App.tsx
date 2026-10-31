@@ -3,7 +3,16 @@ import Products from "./pages/Products";
 import Plans from "./pages/Plans";
 import Customers from "./pages/Customers";
 import Subscriptions from "./pages/Subscriptions";
-import Quatations from "./pages/Quotations";
+import Quotations from "./pages/Quotations";
+import Invoices from "./pages/Invoices";
+import Payments from "./pages/Payments";
+import Reports from "./pages/Reports";
+import Discounts from "./pages/Discounts";
+import Taxes from "./pages/Taxes";
+import Staff from "./pages/Staff";
+import SettingsPage from "./pages/Settings";
+import Auth from "./pages/auth/Auth";
+import CustomerPortal from "./pages/customer/CustomerPortal";
 import { useState, type LucideIcon } from "react";
 import {
   LayoutDashboard,
@@ -18,7 +27,7 @@ import {
   Tags,
   BarChart3,
   UserCog,
-  Settings,
+  Settings as SettingsIcon,
   Bell,
   Search,
   ChevronDown,
@@ -60,7 +69,7 @@ const navigation: NavItem[] = [
   { label: "Taxes", icon: Tags },
   { label: "Reports", icon: BarChart3 },
   { label: "Staff", icon: UserCog },
-  { label: "Settings", icon: Settings },
+  { label: "Settings", icon: SettingsIcon },
 ];
 
 const revenueData = [
@@ -527,9 +536,26 @@ function ComingSoon({ title }: { title: string }) {
 }
 
 export default function App() {
+  const [isDemoAuthenticated, setIsDemoAuthenticated] = useState(false);
+  const [isCustomerPreview, setIsCustomerPreview] = useState(false);
   const [activePage, setActivePage] = useState("Dashboard");
   const [mobileOpen, setMobileOpen] = useState(false);
+if (isCustomerPreview) {
+    return (
+      <CustomerPortal
+        onLogout={() => setIsCustomerPreview(false)}
+      />
+    );
+  }
 
+if (!isDemoAuthenticated) {
+  return (
+    <Auth
+      onLogin={() => setIsDemoAuthenticated(true)}
+      onCustomerPreview={() => setIsCustomerPreview(true)}
+    />
+  );
+}
   return (
     <div className="flex min-h-screen bg-[#F5F7FA] text-slate-800">
       <Sidebar
@@ -604,7 +630,21 @@ export default function App() {
             ) : activePage === "Subscriptions" ?(
               <Subscriptions />
             ) : activePage === "Quotations" ? (
-              <Quatations />
+              <Quotations />
+            ) : activePage === "Invoices" ? (
+              <Invoices />
+            ) : activePage === "Payments" ? (
+              <Payments />
+            ) : activePage === "Reports" ? (
+              <Reports />
+            ) : activePage === "Discounts" ? (
+              <Discounts />
+            ) : activePage === "Taxes" ? (
+              <Taxes />
+            ) : activePage === "Staff" ? (
+              <Staff />
+            ) : activePage === "Settings" ? (
+              <SettingsPage />
             ) : (
               <ComingSoon title={activePage} />
             )}
