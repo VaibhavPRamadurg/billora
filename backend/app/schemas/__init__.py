@@ -11,10 +11,28 @@ from app.schemas.catalog import (
     ProductVariantResponse,
     ProductVariantUpdate,
 )
+from app.schemas.plans import (
+    PlanCreate,
+    PlanPage,
+    PlanProductCreate,
+    PlanProductPage,
+    PlanProductResponse,
+    PlanProductUpdate,
+    PlanResponse,
+    PlanUpdate,
+)
 
 __all__ = [
     "AccessTokenResponse",
     "LoginRequest",
+    "PlanCreate",
+    "PlanPage",
+    "PlanProductCreate",
+    "PlanProductPage",
+    "PlanProductResponse",
+    "PlanProductUpdate",
+    "PlanResponse",
+    "PlanUpdate",
     "ProductCreate",
     "ProductPage",
     "ProductResponse",

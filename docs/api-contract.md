@@ -133,3 +133,57 @@ Duplicate variant names within a product and duplicate non-null SKUs return HTTP
 Deleting a product or variant that is referenced by catalog composition or subscription
 records returns HTTP 409 and the caller should deactivate it instead. Missing resources
 return HTTP 404.
+
+## Subscription plans
+
+All plan endpoints require a Bearer token. Admins and staff can create and update plans
+and their product associations; only admins can delete plans. Customers only retrieve
+active plans and only see associations whose product and optional variant are active.
+
+| Method | Endpoint | Access |
+| --- | --- | --- |
+| `POST` | `/api/v1/plans` | Admin, staff |
+| `GET` | `/api/v1/plans` | Authenticated users |
+| `GET` | `/api/v1/plans/{plan_id}` | Authenticated users |
+| `PATCH` | `/api/v1/plans/{plan_id}` | Admin, staff |
+| `DELETE` | `/api/v1/plans/{plan_id}` | Admin |
+| `POST` | `/api/v1/plans/{plan_id}/products` | Admin, staff |
+| `GET` | `/api/v1/plans/{plan_id}/products` | Authenticated users |
+| `PATCH` | `/api/v1/plans/{plan_id}/products/{association_id}` | Admin, staff |
+| `DELETE` | `/api/v1/plans/{plan_id}/products/{association_id}` | Admin, staff |
+
+Create a plan using an existing billing frequency (`monthly`, `quarterly`, or `yearly`)
+and a decimal amount serialized as a string:
+
+```json
+{
+  "name": "Premium annual",
+  "description": "Annual premium service",
+  "billing_frequency": "yearly",
+  "currency": "USD",
+  "price": "120.00",
+  "trial_days": 14,
+  "is_active": true
+}
+```
+
+Add a product to a plan, optionally selecting a variant and overriding the plan item
+price. `unit_price` does not implement billing calculations; it is only the plan's
+configured price data for Member 2's billing engine.
+
+```json
+{
+  "product_id": "8fdf9e75-cf5d-4f01-a1e1-8ae86af5d9ef",
+  "product_variant_id": "b7c5883c-2948-4bc4-9ec7-ea9b399cdc1f",
+  "quantity": "1.000",
+  "unit_price": "10.00",
+  "position": 0
+}
+```
+
+Plan listing supports `offset`, `limit` (1–100), `search`, `is_active` for catalog
+managers, and `billing_frequency`. Product associations enforce that a variant belongs
+to its selected product. Duplicate positions and duplicate product/variant associations
+return HTTP 409. Plans referenced by subscriptions cannot be deleted and should instead
+be deactivated. Existing association deletion follows the schema's `SET NULL` behavior
+for downstream subscription-item references.
