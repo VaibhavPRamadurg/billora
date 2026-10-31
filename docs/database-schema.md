@@ -24,7 +24,7 @@ This document defines Billora's Step 2A SQLAlchemy metadata. It does not create 
 
 | Table | Key columns | Relationships and constraints |
 | --- | --- | --- |
-| `subscriptions` | `customer_id`, `plan_id`, `status`, frequency snapshot, currency, optional current-period bounds, `next_billing_at`, pause/resume/cancel fields | Indexed by customer/status and status/next billing time. New subscriptions default to `draft`. Pre-activation states (`draft`, `quotation`, `confirmed`) have no billing period; active/paused and all period-bearing records require both ordered UTC period timestamps. `paused_at`, `resume_at`, `cancel_at`, `cancel_at_period_end`, and `auto_renew` support the lifecycle. Paused subscriptions are excluded by the billing worker, not a model hook. |
+| `subscriptions` | `customer_id`, `plan_id`, `status`, frequency snapshot, currency, optional `billing_anchor_at`, current-period bounds, `next_billing_at`, pause/resume/cancel fields | Indexed by customer/status and status/next billing time. New subscriptions default to `draft`. Pre-activation states (`draft`, `quotation`, `confirmed`) have no billing period; active/paused and all period-bearing records require both ordered UTC period timestamps. `billing_anchor_at` is the immutable original activation boundary used to preserve month-end and leap-year renewal schedules. `paused_at`, `resume_at`, `cancel_at`, `cancel_at_period_end`, and `auto_renew` support the lifecycle. Paused subscriptions are excluded by the billing worker, not a model hook. |
 | `subscription_items` | `subscription_id`, plan-product reference, product/variant snapshots, quantity, `unit_price` | Non-negative quantity rule. Keeps chosen plan composition and price available even if the plan changes later. |
 | `quotation_templates` | optional `customer_id`, status, currency, `valid_until`, `converted_subscription_id`, `converted_at` | Enables a quote/template to be linked once to its resulting subscription. Status supports draft through converted/cancelled. |
 | `quotation_template_items` | quote ID, product/variant, quantity, unit price, position | Unique item position per quote and positive quantity. |
@@ -60,6 +60,24 @@ to perform a destructive rollback.
 
 Activation is the point at which application code must assign a valid billing period.
 This schema migration deliberately does not create invoices or invoke billing behavior.
+
+## Recurring billing anchor
+
+Revision `20261031_0003` adds nullable `subscriptions.billing_anchor_at` as a UTC
+timestamp. It is intentionally not backfilled: `started_at` can predate activation,
+`current_period_start` changes after renewals, and `next_billing_at` can be cleared while
+paused, so none can reliably reconstruct the original cadence.
+
+When a subscription first transitions to `active`, the lifecycle API must set
+`billing_anchor_at` to that initial `current_period_start` in the same transaction and
+never change it. Pause/resume preserves it. A recurring worker calculates each next
+half-open period from the previous period end, the persisted frequency, and this anchor
+via `calculate_subscription_billing_period(..., anchor_at=billing_anchor_at)`.
+Existing subscriptions with a null anchor must be skipped by recurring automation until
+an operator supplies an authoritative anchor; guessing would drift month-end schedules.
+The local `scripts/remediate_billing_anchor.py` command requires one subscription UUID,
+an explicit UTC anchor, and `--confirm`; it validates known current/invoice periods but
+does not alter them or any financial records.
 
 ## Decisions to confirm
 

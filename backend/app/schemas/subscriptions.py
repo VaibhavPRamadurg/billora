@@ -74,6 +74,7 @@ class SubscriptionResponse(BaseModel):
     billing_frequency: BillingFrequency
     currency: str
     started_at: datetime
+    billing_anchor_at: datetime | None
     current_period_start: datetime | None
     current_period_end: datetime | None
     next_billing_at: datetime | None

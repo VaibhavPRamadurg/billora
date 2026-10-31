@@ -81,6 +81,9 @@ def test_subscription_lifecycle_metadata_supports_pre_activation_periods() -> No
     assert subscription.c.status.server_default.arg == "draft"
     assert subscription.c.current_period_start.nullable is True
     assert subscription.c.current_period_end.nullable is True
+    assert subscription.c.billing_anchor_at.nullable is True
+    assert isinstance(subscription.c.billing_anchor_at.type, DateTime)
+    assert subscription.c.billing_anchor_at.type.timezone is True
     assert any(
         isinstance(constraint, CheckConstraint)
         and constraint.name == "ck_subscriptions_period_order"

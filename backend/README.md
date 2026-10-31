@@ -61,6 +61,60 @@ changing its role, and uses `backend/.env` for the server-side Supabase connecti
 Run it only from a secured operator machine; never expose the database URL, password,
 or this capability to the frontend.
 
+## Remediate a historical billing anchor
+
+After revision `20261031_0003` has been reviewed and applied, recurring billing must
+skip active or paused subscriptions whose `billing_anchor_at` is null. Never infer an
+anchor from `started_at`, `current_period_start`, or `next_billing_at`. First obtain an
+authoritative original billing timestamp, then use the local operator command below;
+it changes only that one anchor after validating the stored cadence and invoice history.
+
+```bash
+cd backend
+source .venv/bin/activate
+python scripts/remediate_billing_anchor.py \
+  --subscription-id 8fdf9e75-cf5d-4f01-a1e1-8ae86af5d9ef \
+  --anchor-at 2026-01-31T00:00:00Z \
+  --confirm
+```
+
+The anchor must use `Z` or `+00:00`; local offsets are rejected. The command never
+changes subscription periods, lifecycle status, invoices, or payments.
+
+To inventory records before remediation, run this read-only query manually against an
+approved database connection (it is not run by Billora):
+
+```sql
+SELECT id, customer_id, billing_frequency, status, current_period_start, current_period_end
+FROM subscriptions
+WHERE status IN ('active', 'paused')
+  AND billing_anchor_at IS NULL
+ORDER BY current_period_start NULLS LAST, id;
+```
+
+## Run recurring billing manually
+
+Recurring billing is intentionally an operator-run local batch in the MVP; no scheduler
+or hosted job is configured. Review due records first without writing, then explicitly
+confirm execution from a secured backend environment:
+
+```bash
+cd backend
+source .venv/bin/activate
+python scripts/run_recurring_billing.py --dry-run --batch-size 50
+python scripts/run_recurring_billing.py --confirm --batch-size 50
+```
+
+The command emits one JSON record per processed, skipped, failed, or dry-run
+subscription. It processes only active, due subscriptions and skips/report records with
+missing anchors or malformed schedule data. A due subscription's current period is
+invoiced first (or its existing manually generated invoice is reused), then exactly one
+next anchored period is scheduled. Use the existing manual invoice endpoint immediately
+after activation when an initial invoice must be issued in advance; the worker catches
+up that initial period at its first due run if it was missed. Re-run the command to
+process another overdue period; it never uses the worker execution time as a billing
+anchor.
+
 ## Alembic migrations
 
 Alembic reads `DATABASE_URL` from `backend/.env` through the same Pydantic settings

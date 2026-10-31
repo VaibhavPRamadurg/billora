@@ -73,6 +73,7 @@ def generate_initial_invoice(
     subscription_id: UUID,
     *,
     discount_code: str | None = None,
+    commit: bool = True,
 ) -> InvoiceGenerationResult:
     """Persist one draft invoice for the subscription's current active period.
 
@@ -84,9 +85,31 @@ def generate_initial_invoice(
         select(Subscription)
         .options(selectinload(Subscription.items))
         .where(Subscription.id == subscription_id)
+        .with_for_update()
     )
     if subscription is None:
         raise InvoiceGenerationValidationError("Subscription not found")
+    return generate_subscription_period_invoice(
+        db,
+        subscription,
+        discount_code=discount_code,
+        commit=commit,
+    )
+
+
+def generate_subscription_period_invoice(
+    db: Session,
+    subscription: Subscription,
+    *,
+    discount_code: str | None = None,
+    commit: bool = True,
+) -> InvoiceGenerationResult:
+    """Generate or retrieve an invoice for a locked subscription's current period.
+
+    ``commit=False`` is for callers which own a larger transaction, notably the
+    recurring worker. It flushes inside a savepoint so an invoice uniqueness race
+    can be resolved without discarding the caller's subscription row lock.
+    """
     period_start, period_end = _validate_billable_subscription(subscription)
 
     exact_invoice = _find_exact_invoice(
@@ -152,17 +175,36 @@ def generate_initial_invoice(
             zip(source_items, line_discounts, line_taxes, line_totals, strict=True)
         )
     ]
-    db.add(invoice)
+    redemption: DiscountRedemption | None = None
     if discount_rule is not None and discount_amount > 0:
-        db.add(
-            DiscountRedemption(
-                discount_rule_id=discount_rule.id,
-                invoice=invoice,
-                customer_id=subscription.customer_id,
-                discount_amount=discount_amount,
-            )
+        redemption = DiscountRedemption(
+            discount_rule_id=discount_rule.id,
+            invoice=invoice,
+            customer_id=subscription.customer_id,
+            discount_amount=discount_amount,
         )
 
+    if not commit:
+        try:
+            with db.begin_nested():
+                db.add(invoice)
+                if redemption is not None:
+                    db.add(redemption)
+                db.flush()
+        except IntegrityError:
+            exact_invoice = _find_exact_invoice(
+                db, subscription.id, period_start, period_end
+            )
+            if exact_invoice is not None:
+                return InvoiceGenerationResult(invoice=exact_invoice, created=False)
+            raise InvoiceGenerationConflict("Invoice generation conflicts with existing billing data") from None
+        except SQLAlchemyError:
+            raise InvoiceGenerationDatabaseError("Invoice generation could not be completed") from None
+        return InvoiceGenerationResult(invoice=invoice, created=True)
+
+    db.add(invoice)
+    if redemption is not None:
+        db.add(redemption)
     try:
         db.commit()
     except IntegrityError:

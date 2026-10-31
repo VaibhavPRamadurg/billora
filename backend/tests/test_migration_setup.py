@@ -14,6 +14,7 @@ from alembic.script import ScriptDirectory
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
 REVISION_PATH = BACKEND_ROOT / "alembic" / "versions" / "20261031_0001_initial_billora_schema.py"
 LIFECYCLE_REVISION_PATH = BACKEND_ROOT / "alembic" / "versions" / "20261031_0002_subscription_lifecycle.py"
+ANCHOR_REVISION_PATH = BACKEND_ROOT / "alembic" / "versions" / "20261031_0003_billing_anchor.py"
 
 
 def _load_revision_module():
@@ -32,11 +33,19 @@ def _load_lifecycle_revision_module():
     return module
 
 
+def _load_anchor_revision_module():
+    spec = importlib.util.spec_from_file_location("billing_anchor", ANCHOR_REVISION_PATH)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def test_alembic_config_discovers_the_initial_revision() -> None:
     config = Config(str(BACKEND_ROOT / "alembic.ini"))
     script_directory = ScriptDirectory.from_config(config)
 
-    assert script_directory.get_current_head() == "20261031_0002"
+    assert script_directory.get_current_head() == "20261031_0003"
 
 
 def test_initial_revision_declares_postgresql_safety_requirements() -> None:
@@ -128,3 +137,21 @@ def test_lifecycle_revision_compiles_offline_for_postgresql() -> None:
     assert "ALTER TYPE subscription_status ADD VALUE IF NOT EXISTS 'draft' BEFORE 'active'" in sql
     assert "ALTER TABLE subscriptions ALTER COLUMN current_period_start DROP NOT NULL" in sql
     assert "ALTER TABLE subscriptions ADD CONSTRAINT ck_subscriptions_period_order CHECK" in sql
+
+
+def test_billing_anchor_revision_is_additive_and_compiles_offline() -> None:
+    migration = _load_anchor_revision_module()
+    output = io.StringIO()
+    context = MigrationContext.configure(
+        dialect_name="postgresql",
+        opts={"as_sql": True, "output_buffer": output},
+    )
+    op._proxy = Operations(context)
+    try:
+        migration.upgrade()
+    finally:
+        del op._proxy
+
+    assert migration.revision == "20261031_0003"
+    assert migration.down_revision == "20261031_0002"
+    assert "ALTER TABLE subscriptions ADD COLUMN billing_anchor_at TIMESTAMP WITH TIME ZONE" in output.getvalue()

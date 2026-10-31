@@ -271,6 +271,8 @@ class Subscription(TimestampMixin, Base):
     )
     currency: Mapped[str] = mapped_column(String(3), nullable=False)
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
+    # Set once when the subscription first becomes active; never shift on renewal or resume.
+    billing_anchor_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     current_period_start: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     current_period_end: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     next_billing_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)

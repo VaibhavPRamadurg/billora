@@ -25,11 +25,29 @@ years. The legacy date-only helpers remain available for their existing callers 
 must not be used to create invoice periods.
 
 Month-end recovery requires the original billing anchor timestamp. For example, a
-January 31 schedule needs that anchor to recover March 31 after February 28/29. The
-current subscription schema does not persist a dedicated billing-anchor field, so Step
-4D must receive an approved anchor source or add a migration before automated renewals
-can safely recover month-end schedules. Step 4B can use the existing activated period
-boundaries directly for the initial invoice.
+January 31 schedule needs that anchor to recover March 31 after February 28/29.
+Revision `20261031_0003` adds nullable `Subscription.billing_anchor_at` for this
+purpose. The lifecycle API sets it once to the first activation's `current_period_start`;
+pause/resume never changes it. Existing records are not
+backfilled because their original anchor cannot be recovered reliably, and recurring
+automation must skip them until an operator supplies an authoritative value.
+
+## Recurring worker policy
+
+The local recurring worker considers only `active` subscriptions that are due
+(`next_billing_at <= now`) and have an anchor plus complete UTC period data. It locks
+each subscription with PostgreSQL `FOR UPDATE SKIP LOCKED`, revalidates that
+`next_billing_at` equals the current period end, and skips/reports incomplete or
+anchor-conflicting records without repairing them.
+
+For a due subscription it first creates the invoice for the *current* period, or
+reuses the exact existing invoice created by the manual endpoint. This ensures the
+initial period is never skipped, although the manual endpoint remains the path to
+issue it in advance immediately after activation. In the same transaction it then
+advances to exactly one next period calculated from the immutable anchor. Repeated
+executions therefore cannot duplicate an invoice, and overdue subscriptions catch up
+one period per successful worker pass. The worker never changes payments or uses its
+execution timestamp as a schedule anchor.
 
 ## Tax
 

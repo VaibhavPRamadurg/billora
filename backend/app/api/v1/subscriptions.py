@@ -222,6 +222,8 @@ def activate_subscription(
     _transition(subscription, SubscriptionStatus.ACTIVE)
     subscription.current_period_start = payload.current_period_start
     subscription.current_period_end = payload.current_period_end
+    if subscription.billing_anchor_at is None:
+        subscription.billing_anchor_at = payload.current_period_start
     subscription.next_billing_at = payload.current_period_end
     return _commit_transition(db, subscription)
 

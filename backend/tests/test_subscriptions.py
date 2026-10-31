@@ -7,6 +7,7 @@ from uuid import UUID, uuid4
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
@@ -14,7 +15,16 @@ from app.core.config import settings
 from app.core.security import create_access_token, hash_password
 from app.db.session import get_db
 from app.main import app
-from app.models import BillingFrequency, Plan, PlanProduct, Product, Subscription, User, UserRole
+from app.models import (
+    BillingFrequency,
+    Plan,
+    PlanProduct,
+    Product,
+    Subscription,
+    SubscriptionStatus,
+    User,
+    UserRole,
+)
 
 
 SUBSCRIPTION_TABLES = (
@@ -175,7 +185,36 @@ def test_lifecycle_transitions_require_activation_periods_and_reject_invalid_sta
     )
     assert active.status_code == 200
     assert active.json()["status"] == "active"
+    assert active.json()["billing_anchor_at"].startswith("2026-01-01T00:00:00")
     assert active.json()["next_billing_at"].startswith("2026-02-01T00:00:00")
+
+
+def test_activation_rolls_back_anchor_and_periods_when_commit_fails(subscriptions, monkeypatch) -> None:
+    subscription_id = subscriptions.create_draft().json()["id"]
+    assert subscriptions.client.post(
+        f"/api/v1/subscriptions/{subscription_id}/quotation", headers=subscriptions.headers()
+    ).status_code == 200
+    assert subscriptions.client.post(
+        f"/api/v1/subscriptions/{subscription_id}/confirm", headers=subscriptions.headers()
+    ).status_code == 200
+
+    def reject_commit() -> None:
+        raise IntegrityError("update", {}, Exception("database failure"))
+
+    monkeypatch.setattr(subscriptions.session, "commit", reject_commit)
+    response = subscriptions.client.post(
+        f"/api/v1/subscriptions/{subscription_id}/activate",
+        headers=subscriptions.headers(),
+        json={"current_period_start": "2026-01-01T00:00:00Z", "current_period_end": "2026-02-01T00:00:00Z"},
+    )
+
+    assert response.status_code == 409
+    restored = subscriptions.session.get(Subscription, UUID(subscription_id))
+    assert restored is not None
+    assert restored.status is SubscriptionStatus.CONFIRMED
+    assert restored.billing_anchor_at is None
+    assert restored.current_period_start is None
+    assert restored.current_period_end is None
 
 
 def test_pause_resume_close_cancel_and_expire_rules(subscriptions) -> None:
@@ -189,6 +228,7 @@ def test_pause_resume_close_cancel_and_expire_rules(subscriptions) -> None:
     assert paused.json()["next_billing_at"] is None
     resumed = subscriptions.client.post(f"/api/v1/subscriptions/{subscription_id}/resume", headers=subscriptions.headers())
     assert resumed.json()["status"] == "active"
+    assert resumed.json()["billing_anchor_at"].startswith("2026-01-01T00:00:00")
     closed = subscriptions.client.post(f"/api/v1/subscriptions/{subscription_id}/close", headers=subscriptions.headers())
     assert closed.json()["status"] == "closed"
     assert closed.json()["auto_renew"] is False
