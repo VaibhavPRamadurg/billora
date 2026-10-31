@@ -50,6 +50,14 @@ persisted invoice-item snapshots; it does not upload a file to Supabase Storage 
 invoice, payment, subscription, or billing records. Customers can export only their own
 invoices, while administrators and staff can export any invoice.
 
+## Analytics dashboard API
+
+Admin and Staff users can query dashboard-ready analytics under `/api/v1/analytics`:
+`overview`, `revenue`, `subscriptions`, and `invoices`. Monetary results are always
+grouped by currency; do not combine the returned totals across currencies. Revenue
+trends accept optional `start_date` and `end_date` query parameters in `YYYY-MM-DD`
+format. See `docs/api-contract.md` for response shapes and financial definitions.
+
 ## Create the initial administrator
 
 After the approved migrations have been applied, a trusted local operator can create

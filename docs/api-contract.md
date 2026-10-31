@@ -312,3 +312,57 @@ applied amount of zero and do not change the invoice balance. `refunded` is reje
 this MVP because no refund allocation workflow exists. Draft, confirmed, and
 partially-paid invoices are payable; paid and cancelled invoices are not. Payment
 responses include the current `outstanding_balance`.
+
+## Analytics
+
+Analytics endpoints are available only to Admin and Staff users. Customers receive HTTP
+403. Monetary values are returned as per-currency arrays; frontend clients must not sum
+different currencies.
+
+| Method | Endpoint | Purpose |
+| --- | --- | --- |
+| `GET` | `/api/v1/analytics/overview` | Operational counts and global money totals |
+| `GET` | `/api/v1/analytics/revenue` | Monthly invoiced and collected-revenue chart series |
+| `GET` | `/api/v1/analytics/subscriptions` | Status and billing-frequency distribution |
+| `GET` | `/api/v1/analytics/invoices` | Invoice status, balances, and recent summaries |
+
+`/analytics/revenue` accepts optional inclusive `start_date` and `end_date` values in
+`YYYY-MM-DD` format. Invoiced trends use persisted invoice creation timestamps because
+draft invoices do not necessarily have `issued_at`; collected trends use `paid_at` from
+successful payments only. Cancelled invoices are excluded from invoiced revenue.
+
+Example overview response:
+
+```json
+{
+  "total_customers": 42,
+  "total_subscriptions": 56,
+  "active_subscriptions": 39,
+  "paused_subscriptions": 4,
+  "total_invoiced": [{"currency": "INR", "amount": "125000.00"}],
+  "total_collected": [{"currency": "INR", "amount": "93000.00"}],
+  "outstanding_balance": [{"currency": "INR", "amount": "32000.00"}],
+  "overdue_invoice_count": 3
+}
+```
+
+Invoice balance summaries separate settled paid amounts, remaining partially-paid
+balances, unpaid balances, and overdue balances. Overdue is calculated only where
+`due_at` is before the current UTC time and `total > amount_paid`, independent of an
+invoice status label.
+
+Example revenue response:
+
+```json
+{
+  "start_date": "2026-01-01",
+  "end_date": "2026-03-31",
+  "invoiced": [{"month": "2026-01", "currency": "INR", "amount": "42000.00"}],
+  "collected": [{"month": "2026-01", "currency": "INR", "amount": "31500.00"}]
+}
+```
+
+`/analytics/subscriptions` returns `by_status`, `by_billing_frequency`, `active_count`,
+and `inactive_count`. `/analytics/invoices` returns `by_status`, per-currency
+`balances` (`paid`, `partially_paid`, `unpaid`, and `overdue`), plus the most recent
+invoice summaries. The optional `recent_limit` parameter is 1-50 and defaults to 10.
