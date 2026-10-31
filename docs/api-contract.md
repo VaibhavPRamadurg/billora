@@ -160,7 +160,7 @@ and a decimal amount serialized as a string:
   "name": "Premium annual",
   "description": "Annual premium service",
   "billing_frequency": "yearly",
-  "currency": "USD",
+  "currency": "INR",
   "price": "120.00",
   "trial_days": 14,
   "is_active": true
@@ -242,3 +242,32 @@ admin/staff operation now; a future scheduler may call the same transition after
 own eligibility checks. These endpoints do not generate invoices, charge payments, or
 invoke Member 2's billing engine. Pre-activation subscriptions have null period bounds
 and must not be selected for billing.
+
+## Invoices
+
+Invoice endpoints require a Bearer token. Admins and staff explicitly generate the
+initial draft invoice for an active subscription; customers cannot generate invoices.
+Generation uses the subscription's existing UTC half-open current period and does not
+change its status or `next_billing_at`.
+
+| Method | Endpoint | Access |
+| --- | --- | --- |
+| `POST` | `/api/v1/subscriptions/{subscription_id}/invoices/generate` | Admin, staff |
+| `GET` | `/api/v1/invoices` | Authenticated users; customers see only their own |
+| `GET` | `/api/v1/invoices/{invoice_id}` | Authenticated users; customers see only their own |
+
+An optional, explicit discount code can be supplied by an administrator or staff
+member. Discounts are applied before the tax rule selected for the configured MVP
+`BILLING_COUNTRY` (default `IN`); this configuration is not a customer address.
+
+```json
+{
+  "discount_code": "WELCOME"
+}
+```
+
+Successful new generation returns HTTP 201. Repeating the exact same subscription and
+period returns the existing invoice with HTTP 200. An overlapping, non-identical period
+returns HTTP 409. Only active subscriptions with non-null ordered period boundaries and
+at least one snapshot item may be invoiced. No payment, PDF, lifecycle transition, or
+recurring scheduling action occurs.

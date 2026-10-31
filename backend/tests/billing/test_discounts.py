@@ -1,5 +1,6 @@
-from datetime import date
+from datetime import date, datetime, timezone
 from decimal import Decimal
+from uuid import uuid4
 
 import pytest
 
@@ -8,8 +9,11 @@ from app.services.billing.discounts import (
     DiscountEvaluationContext,
     DiscountRejectionReason,
     DiscountRule,
+    PersistedDiscountContext,
     evaluate_discount,
+    evaluate_persisted_discount_rule,
 )
+from app.models import DiscountRule as PersistedDiscountRule, DiscountType
 
 
 def context(**kwargs: object) -> DiscountEvaluationContext:
@@ -154,3 +158,92 @@ def test_invalid_evaluation_inputs_raise() -> None:
         DiscountEvaluationContext(date(2026, 6, 15), usage_count=True)  # type: ignore[arg-type]
     with pytest.raises(ValueError, match="usage_count"):
         DiscountEvaluationContext(date(2026, 6, 15), usage_count=-1)
+
+
+def persisted_rule(**overrides: object) -> PersistedDiscountRule:
+    fields: dict[str, object] = {
+        "code": "WELCOME",
+        "name": "Welcome discount",
+        "discount_type": DiscountType.PERCENTAGE,
+        "value": Decimal("10"),
+        "max_discount_amount": None,
+        "currency": "INR",
+        "eligibility": None,
+        "usage_limit": None,
+        "per_customer_usage_limit": None,
+        "is_active": True,
+        "valid_from": None,
+        "valid_to": None,
+    }
+    fields.update(overrides)
+    return PersistedDiscountRule(**fields)
+
+
+def persisted_context(**overrides: object) -> PersistedDiscountContext:
+    fields: dict[str, object] = {
+        "evaluated_at": datetime(2026, 6, 15, tzinfo=timezone.utc),
+        "currency": "INR",
+    }
+    fields.update(overrides)
+    return PersistedDiscountContext(**fields)
+
+
+def test_persisted_discount_applies_cap_before_tax() -> None:
+    result = evaluate_persisted_discount_rule(
+        "2500",
+        persisted_rule(max_discount_amount=Decimal("125.00")),
+        persisted_context(),
+    )
+
+    assert result == DiscountEvaluation(True, Decimal("125.00"))
+
+
+@pytest.mark.parametrize(
+    ("rule", "context", "reason"),
+    [
+        (persisted_rule(is_active=False), persisted_context(), DiscountRejectionReason.INACTIVE),
+        (persisted_rule(currency="USD"), persisted_context(), DiscountRejectionReason.CURRENCY_MISMATCH),
+        (persisted_rule(usage_limit=1), persisted_context(usage_count=1), DiscountRejectionReason.USAGE_LIMIT_REACHED),
+        (
+            persisted_rule(per_customer_usage_limit=1),
+            persisted_context(customer_usage_count=1),
+            DiscountRejectionReason.PER_CUSTOMER_USAGE_LIMIT_REACHED,
+        ),
+    ],
+)
+def test_persisted_discount_rejects_inapplicable_rule(
+    rule: PersistedDiscountRule,
+    context: PersistedDiscountContext,
+    reason: DiscountRejectionReason,
+) -> None:
+    result = evaluate_persisted_discount_rule("100", rule, context)
+
+    assert result.applies is False
+    assert result.rejection_reason is reason
+
+
+def test_persisted_discount_uses_documented_json_eligibility_scopes() -> None:
+    customer_id, product_id, plan_id, subscription_id = (uuid4() for _ in range(4))
+    rule = persisted_rule(
+        eligibility={
+            "customer_ids": [str(customer_id)],
+            "product_ids": [str(product_id)],
+            "plan_ids": [str(plan_id)],
+            "subscription_ids": [str(subscription_id)],
+        }
+    )
+
+    accepted = evaluate_persisted_discount_rule(
+        "100",
+        rule,
+        persisted_context(
+            customer_id=customer_id,
+            product_ids=frozenset({product_id}),
+            plan_id=plan_id,
+            subscription_id=subscription_id,
+        ),
+    )
+    rejected = evaluate_persisted_discount_rule("100", rule, persisted_context())
+
+    assert accepted == DiscountEvaluation(True, Decimal("10.00"))
+    assert rejected.rejection_reason is DiscountRejectionReason.CUSTOMER_SCOPE_MISMATCH

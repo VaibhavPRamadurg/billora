@@ -12,9 +12,13 @@
    JWT_ALGORITHM=HS256
    ACCESS_TOKEN_EXPIRE_MINUTES=30
    FRONTEND_URL=http://localhost:5173
+   BILLING_COUNTRY=IN
    ```
 
    Do not commit this file. Database credentials remain server-side: the browser only receives the API base URL and must never receive a Supabase database password, service-role key, or direct connection string.
+
+`BILLING_COUNTRY` is the MVP tax-country assumption used only by server-side invoice
+generation. It defaults to `IN`; it is not a verified customer billing address.
 
 ## Run locally
 

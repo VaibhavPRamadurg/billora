@@ -15,7 +15,7 @@ class PlanFields(BaseModel):
     name: str = Field(min_length=1, max_length=160)
     description: str | None = Field(default=None, max_length=10_000)
     billing_frequency: BillingFrequency
-    currency: str = Field(default="USD", pattern=r"^[A-Za-z]{3}$")
+    currency: str = Field(default="INR", pattern=r"^[A-Za-z]{3}$")
     price: Decimal = Field(ge=0, max_digits=18, decimal_places=2)
     trial_days: int = Field(default=0, ge=0)
     is_active: bool = True

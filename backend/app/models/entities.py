@@ -175,7 +175,7 @@ class Plan(TimestampMixin, Base):
         nullable=False,
         index=True,
     )
-    currency: Mapped[str] = mapped_column(String(3), nullable=False, default="USD")
+    currency: Mapped[str] = mapped_column(String(3), nullable=False, default="INR")
     price: Mapped[Decimal] = mapped_column(Money, nullable=False)
     trial_days: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, index=True)
@@ -320,7 +320,7 @@ class QuotationTemplate(TimestampMixin, Base):
         nullable=False,
         default=QuotationStatus.DRAFT,
     )
-    currency: Mapped[str] = mapped_column(String(3), nullable=False, default="USD")
+    currency: Mapped[str] = mapped_column(String(3), nullable=False, default="INR")
     valid_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
     converted_subscription_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("subscriptions.id", ondelete="SET NULL"), unique=True

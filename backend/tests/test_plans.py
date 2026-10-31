@@ -60,7 +60,6 @@ class PlanHarness:
             json={
                 "name": name,
                 "billing_frequency": "monthly",
-                "currency": "usd",
                 "price": "10.00",
                 **extra,
             },
@@ -118,7 +117,7 @@ def test_admin_can_create_list_retrieve_update_and_delete_plans(plans) -> None:
     created = plans.create_plan("Premium", description="Full access", trial_days=14)
     assert created.status_code == 201
     plan = created.json()
-    assert plan["currency"] == "USD"
+    assert plan["currency"] == "INR"
     assert plan["price"] == "10.00"
 
     listing = plans.client.get("/api/v1/plans?search=rem&billing_frequency=monthly", headers=plans.headers)

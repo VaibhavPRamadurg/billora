@@ -1,13 +1,16 @@
 """Database-independent discount rule validation and evaluation."""
 
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 from enum import StrEnum
 from typing import Iterable
+from uuid import UUID
 
+from app.models import DiscountRule as PersistedDiscountRule
+from app.models import DiscountType
 from app.services.billing.calculator import DiscountInput, calculate_discount
-from app.services.billing.dates import validate_billing_date
+from app.services.billing.dates import validate_billing_date, validate_utc_timestamp
 from app.utils.money import quantize_money, to_decimal
 
 
@@ -21,6 +24,12 @@ class DiscountRejectionReason(StrEnum):
     PRODUCT_SCOPE_MISMATCH = "product_scope_mismatch"
     SUBSCRIPTION_SCOPE_MISMATCH = "subscription_scope_mismatch"
     EXCEEDS_ELIGIBLE_SUBTOTAL = "exceeds_eligible_subtotal"
+    INACTIVE = "inactive"
+    CURRENCY_MISMATCH = "currency_mismatch"
+    PER_CUSTOMER_USAGE_LIMIT_REACHED = "per_customer_usage_limit_reached"
+    CUSTOMER_SCOPE_MISMATCH = "customer_scope_mismatch"
+    PLAN_SCOPE_MISMATCH = "plan_scope_mismatch"
+    MAX_DISCOUNT_REACHED = "max_discount_reached"
 
 
 def _normalize_scope(values: Iterable[str] | None, field_name: str) -> frozenset[str]:
@@ -169,3 +178,135 @@ def _rejected(reason: DiscountRejectionReason) -> DiscountEvaluation:
         discount_amount=Decimal("0.00"),
         rejection_reason=reason,
     )
+
+
+def _normalized_identifier(value: UUID | str | None, field_name: str) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, UUID):
+        return str(value)
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{field_name} must be a UUID/string identifier or None")
+    return value.strip()
+
+
+@dataclass(frozen=True, slots=True)
+class PersistedDiscountContext:
+    """Database-derived facts required to evaluate a persisted discount rule.
+
+    ``usage_count`` and ``customer_usage_count`` must be calculated by Step 4B
+    from committed ``DiscountRedemption`` records while generating an invoice.
+    """
+
+    evaluated_at: datetime
+    currency: str
+    usage_count: int = 0
+    customer_usage_count: int = 0
+    customer_id: UUID | str | None = None
+    plan_id: UUID | str | None = None
+    subscription_id: UUID | str | None = None
+    product_ids: frozenset[UUID | str] = field(default_factory=frozenset)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self, "evaluated_at", validate_utc_timestamp(self.evaluated_at, "evaluated_at")
+        )
+        if not isinstance(self.currency, str) or len(self.currency.strip()) != 3:
+            raise ValueError("currency must be a three-letter code")
+        object.__setattr__(self, "currency", self.currency.strip().upper())
+        for field_name in ("usage_count", "customer_usage_count"):
+            value = getattr(self, field_name)
+            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                raise ValueError(f"{field_name} must be a nonnegative integer")
+        for field_name in ("customer_id", "plan_id", "subscription_id"):
+            object.__setattr__(self, field_name, _normalized_identifier(getattr(self, field_name), field_name))
+        object.__setattr__(
+            self,
+            "product_ids",
+            frozenset(
+                _normalized_identifier(product_id, "product_ids")
+                for product_id in self.product_ids
+            ),
+        )
+
+
+def _scope_values(eligibility: dict[str, object] | None, key: str) -> frozenset[str]:
+    """Read the documented identifier-list eligibility format from JSON."""
+    if eligibility is None:
+        return frozenset()
+    if not isinstance(eligibility, dict):
+        raise ValueError("discount eligibility must be a JSON object")
+    value = eligibility.get(key)
+    if value is None:
+        return frozenset()
+    if not isinstance(value, list):
+        raise ValueError(f"discount eligibility {key} must be a list")
+    normalized: set[str] = set()
+    for identifier in value:
+        if not isinstance(identifier, str) or not identifier.strip():
+            raise ValueError(f"discount eligibility {key} must contain non-empty strings")
+        normalized.add(identifier.strip())
+    return frozenset(normalized)
+
+
+def evaluate_persisted_discount_rule(
+    eligible_subtotal: object,
+    rule: PersistedDiscountRule,
+    context: PersistedDiscountContext,
+) -> DiscountEvaluation:
+    """Evaluate a persisted rule before tax using its database-backed semantics.
+
+    Supported ``eligibility`` JSON keys are identifier lists named
+    ``customer_ids``, ``product_ids``, ``plan_ids``, and ``subscription_ids``.
+    Validity is UTC ``[valid_from, valid_to)``. A configured max-discount cap is
+    applied after calculating a fixed or percentage discount.
+    """
+    if not isinstance(rule, PersistedDiscountRule):
+        raise TypeError("rule must be a persisted DiscountRule")
+    if not isinstance(context, PersistedDiscountContext):
+        raise TypeError("context must be a PersistedDiscountContext")
+    subtotal = quantize_money(to_decimal(eligible_subtotal, "eligible subtotal"))
+    if subtotal < 0:
+        raise ValueError("eligible subtotal must be nonnegative")
+
+    if not rule.is_active:
+        return _rejected(DiscountRejectionReason.INACTIVE)
+    if rule.currency is not None and rule.currency.strip().upper() != context.currency:
+        return _rejected(DiscountRejectionReason.CURRENCY_MISMATCH)
+    if rule.valid_from is not None and context.evaluated_at < validate_utc_timestamp(rule.valid_from, "rule.valid_from"):
+        return _rejected(DiscountRejectionReason.NOT_STARTED)
+    if rule.valid_to is not None and context.evaluated_at >= validate_utc_timestamp(rule.valid_to, "rule.valid_to"):
+        return _rejected(DiscountRejectionReason.EXPIRED)
+    if rule.usage_limit is not None and context.usage_count >= rule.usage_limit:
+        return _rejected(DiscountRejectionReason.USAGE_LIMIT_REACHED)
+    if rule.per_customer_usage_limit is not None and context.customer_usage_count >= rule.per_customer_usage_limit:
+        return _rejected(DiscountRejectionReason.PER_CUSTOMER_USAGE_LIMIT_REACHED)
+
+    customer_ids = _scope_values(rule.eligibility, "customer_ids")
+    product_ids = _scope_values(rule.eligibility, "product_ids")
+    plan_ids = _scope_values(rule.eligibility, "plan_ids")
+    subscription_ids = _scope_values(rule.eligibility, "subscription_ids")
+    if customer_ids and context.customer_id not in customer_ids:
+        return _rejected(DiscountRejectionReason.CUSTOMER_SCOPE_MISMATCH)
+    if product_ids and not product_ids.intersection(context.product_ids):
+        return _rejected(DiscountRejectionReason.PRODUCT_SCOPE_MISMATCH)
+    if plan_ids and context.plan_id not in plan_ids:
+        return _rejected(DiscountRejectionReason.PLAN_SCOPE_MISMATCH)
+    if subscription_ids and context.subscription_id not in subscription_ids:
+        return _rejected(DiscountRejectionReason.SUBSCRIPTION_SCOPE_MISMATCH)
+
+    discount_type = rule.discount_type.value if isinstance(rule.discount_type, DiscountType) else rule.discount_type
+    try:
+        amount = calculate_discount(subtotal, DiscountInput(discount_type, rule.value))
+    except ValueError as exc:
+        if "cannot exceed subtotal" not in str(exc):
+            raise
+        return _rejected(DiscountRejectionReason.EXCEEDS_ELIGIBLE_SUBTOTAL)
+    if rule.max_discount_amount is not None:
+        cap = quantize_money(to_decimal(rule.max_discount_amount, "max_discount_amount"))
+        if cap < 0:
+            raise ValueError("max_discount_amount must be nonnegative")
+        amount = min(amount, cap)
+    if amount == 0:
+        return _rejected(DiscountRejectionReason.MAX_DISCOUNT_REACHED)
+    return DiscountEvaluation(applies=True, discount_amount=amount)

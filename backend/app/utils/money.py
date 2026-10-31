@@ -7,7 +7,8 @@ The planned database ``NUMERIC`` precision must be selected to accommodate the
 same supported range when persistence is introduced.
 """
 
-from decimal import Decimal, DecimalException, InvalidOperation, ROUND_HALF_UP
+from decimal import Decimal, DecimalException, InvalidOperation, ROUND_DOWN, ROUND_HALF_UP
+from typing import Iterable
 
 
 MONEY_QUANTUM = Decimal("0.01")
@@ -77,3 +78,39 @@ def calculate_percentage(amount: object, percentage: object) -> Decimal:
             "percentage calculation exceeds the supported Decimal arithmetic context"
         ) from exc
     return quantize_money(result)
+
+
+def allocate_money_proportionally(total: object, weights: Iterable[object]) -> tuple[Decimal, ...]:
+    """Allocate a rounded amount across nonnegative weights without losing cents.
+
+    The largest-remainder rule assigns any remaining cents by descending fractional
+    remainder, preserving input order as a deterministic tie-breaker.
+    """
+    allocated_total = quantize_money(total)
+    if allocated_total < 0:
+        raise ValueError("total must be nonnegative")
+    decimal_weights = tuple(to_decimal(weight, "weight") for weight in weights)
+    if any(weight < 0 for weight in decimal_weights):
+        raise ValueError("weight must be nonnegative")
+    if not decimal_weights:
+        raise ValueError("weights must not be empty")
+    if allocated_total == 0:
+        return tuple(Decimal("0.00") for _ in decimal_weights)
+    weight_sum = sum(decimal_weights, Decimal("0"))
+    if weight_sum == 0:
+        raise ValueError("weights must sum to more than zero for a positive total")
+
+    try:
+        exact_cents = tuple(allocated_total * Decimal("100") * weight / weight_sum for weight in decimal_weights)
+    except DecimalException as exc:
+        raise MoneyArithmeticError("money allocation exceeds the supported Decimal arithmetic context") from exc
+    whole_cents = [int(value.to_integral_value(rounding=ROUND_DOWN)) for value in exact_cents]
+    cents_remaining = int(allocated_total * Decimal("100")) - sum(whole_cents)
+    ranked_indices = sorted(
+        range(len(exact_cents)),
+        key=lambda index: (exact_cents[index] - Decimal(whole_cents[index]), -index),
+        reverse=True,
+    )
+    for index in ranked_indices[:cents_remaining]:
+        whole_cents[index] += 1
+    return tuple(Decimal(cents) / Decimal("100") for cents in whole_cents)

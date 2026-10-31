@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 from decimal import Decimal, DecimalException
 from typing import Iterable
+from uuid import UUID
 
 from app.utils.money import (
     MoneyArithmeticError,
@@ -70,6 +71,35 @@ class InvoiceTotals:
     tax_rate_percent: Decimal
     tax_amount: Decimal
     total: Decimal
+
+
+@dataclass(frozen=True, slots=True)
+class SubscriptionItemInvoiceInput:
+    """Invoice-ready pricing snapshot supplied by Step 4B's persistence service.
+
+    ``SubscriptionItem`` already preserves quantity and unit price. The invoice
+    service must supply a human-readable description from its catalog snapshot,
+    because the current subscription-item schema intentionally does not store one.
+    """
+
+    subscription_item_id: UUID
+    product_id: UUID
+    product_variant_id: UUID | None
+    description: str
+    quantity: Decimal
+    unit_price: Decimal
+
+    def as_invoice_line(self) -> InvoiceLineInput:
+        """Convert this immutable source snapshot into a validated calculation line."""
+        return InvoiceLineInput(self.description, self.quantity, self.unit_price)
+
+
+@dataclass(frozen=True, slots=True)
+class SubscriptionInvoiceCalculation:
+    """Pure totals and source lines that Step 4B can persist transactionally."""
+
+    source_items: tuple[SubscriptionItemInvoiceInput, ...]
+    totals: InvoiceTotals
 
 
 def calculate_line_subtotal(quantity: object, unit_price: object) -> Decimal:
@@ -190,4 +220,30 @@ def calculate_invoice_totals(
         tax_rate_percent=tax_rate,
         tax_amount=tax_amount,
         total=total,
+    )
+
+
+def calculate_subscription_invoice(
+    items: Iterable[SubscriptionItemInvoiceInput],
+    discount: DiscountInput | None = None,
+    tax_rate_percent: object = Decimal("0"),
+) -> SubscriptionInvoiceCalculation:
+    """Calculate pre-persistence invoice totals from subscription-item snapshots.
+
+    This deliberately has no database side effects. Step 4B is responsible for
+    selecting applicable persisted rules and allocating invoice-level tax and
+    discounts to individual ``InvoiceItem`` rows in one transaction.
+    """
+    source_items = tuple(items)
+    if not source_items:
+        raise ValueError("invoice must contain at least one subscription item")
+    if any(not isinstance(item, SubscriptionItemInvoiceInput) for item in source_items):
+        raise TypeError("items must contain SubscriptionItemInvoiceInput instances")
+    return SubscriptionInvoiceCalculation(
+        source_items=source_items,
+        totals=calculate_invoice_totals(
+            (item.as_invoice_line() for item in source_items),
+            discount=discount,
+            tax_rate_percent=tax_rate_percent,
+        ),
     )

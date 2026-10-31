@@ -1,15 +1,21 @@
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 import pytest
 
 from app.services.billing.dates import (
     BillingInterval,
     BillingPeriod,
+    SubscriptionBillingPeriod,
     calculate_billing_period,
     calculate_next_billing_date,
+    calculate_next_subscription_billing_at,
+    calculate_subscription_billing_period,
     validate_billing_date,
     validate_billing_interval,
+    validate_subscription_frequency,
+    validate_utc_timestamp,
 )
+from app.models import BillingFrequency
 
 
 @pytest.mark.parametrize(
@@ -114,3 +120,38 @@ def test_anchor_date_cannot_be_after_current_date() -> None:
         calculate_next_billing_date(
             date(2026, 1, 15), "monthly", anchor_date=date(2026, 1, 16)
         )
+
+
+def test_subscription_periods_are_utc_half_open_and_support_persisted_frequencies() -> None:
+    start = datetime(2026, 1, 31, 9, 30, tzinfo=timezone.utc)
+
+    assert calculate_subscription_billing_period(start, BillingFrequency.MONTHLY) == SubscriptionBillingPeriod(
+        start_at=start,
+        end_at=datetime(2026, 2, 28, 9, 30, tzinfo=timezone.utc),
+    )
+    assert calculate_subscription_billing_period(start, "quarterly").end_at == datetime(
+        2026, 4, 30, 9, 30, tzinfo=timezone.utc
+    )
+    assert calculate_subscription_billing_period(start, "yearly").end_at == datetime(
+        2027, 1, 31, 9, 30, tzinfo=timezone.utc
+    )
+
+
+def test_subscription_anchor_recovers_month_end_and_normalizes_offsets() -> None:
+    anchor = datetime(2024, 1, 31, 10, tzinfo=timezone.utc)
+    february = datetime(2024, 2, 29, 10, tzinfo=timezone.utc)
+
+    assert calculate_next_subscription_billing_at(february, "monthly", anchor_at=anchor) == datetime(
+        2024, 3, 31, 10, tzinfo=timezone.utc
+    )
+    assert validate_utc_timestamp(
+        datetime(2026, 1, 1, 5, 30, tzinfo=timezone(timedelta(hours=5, minutes=30)))
+    ) == datetime(2026, 1, 1, tzinfo=timezone.utc)
+
+
+@pytest.mark.parametrize("value", [datetime(2026, 1, 1), "monthly", None])
+def test_subscription_timestamp_calculations_reject_invalid_boundaries(value: object) -> None:
+    with pytest.raises((TypeError, ValueError)):
+        calculate_subscription_billing_period(value, "monthly")  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="billing_frequency"):
+        validate_subscription_frequency("weekly")

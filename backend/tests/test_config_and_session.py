@@ -15,6 +15,11 @@ def test_settings_load_database_url_from_backend_environment_file(tmp_path) -> N
     assert configured_settings.database_url is not None
     assert configured_settings.database_url.startswith("postgresql+psycopg://")
     assert configured_settings.frontend_url == "http://localhost:5173"
+    assert configured_settings.billing_country == "IN"
+
+
+def test_billing_country_is_normalized_and_validated() -> None:
+    assert Settings(billing_country="in").billing_country == "IN"
 
 
 def test_get_db_closes_session(monkeypatch) -> None:

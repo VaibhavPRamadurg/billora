@@ -1,13 +1,16 @@
 from decimal import Decimal, DecimalException, Inexact, localcontext
+from uuid import uuid4
 
 import pytest
 
 from app.services.billing.calculator import (
     DiscountInput,
     InvoiceLineInput,
+    SubscriptionItemInvoiceInput,
     calculate_discount,
     calculate_invoice_totals,
     calculate_line_subtotal,
+    calculate_subscription_invoice,
     calculate_subtotal,
     calculate_tax_amount,
 )
@@ -168,3 +171,22 @@ def test_calculator_invalid_input_types_are_clear(value: object) -> None:
 def test_financial_inputs_reject_unsafe_values(value: object) -> None:
     with pytest.raises((TypeError, ValueError)):
         line("Service", value, "10")
+
+
+def test_subscription_snapshot_interface_reuses_decimal_invoice_calculation() -> None:
+    snapshot = SubscriptionItemInvoiceInput(
+        subscription_item_id=uuid4(),
+        product_id=uuid4(),
+        product_variant_id=None,
+        description="Managed service",
+        quantity=Decimal("2.000"),
+        unit_price=Decimal("100.00"),
+    )
+
+    result = calculate_subscription_invoice([snapshot], DiscountInput("fixed", "10"), "18")
+
+    assert result.source_items == (snapshot,)
+    assert result.totals.subtotal == Decimal("200.00")
+    assert result.totals.discount_amount == Decimal("10.00")
+    assert result.totals.tax_amount == Decimal("34.20")
+    assert result.totals.total == Decimal("224.20")
