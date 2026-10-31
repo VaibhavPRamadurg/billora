@@ -12,10 +12,10 @@ import {
   CheckCircle2,
   Sparkles,
 } from "lucide-react";
+import { apiErrorMessage, authApi, type CurrentUser } from "../../api/client";
 
 type AuthProps = {
-  onLogin: () => void;
-  onCustomerPreview: () => void;
+  onLogin: (user: CurrentUser) => void;
 };
 
 type AuthForm = {
@@ -39,7 +39,7 @@ const initialForm: AuthForm = {
 const inputClass =
   "h-11 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-yellow-400 focus:ring-2 focus:ring-yellow-100";
 
-export default function Auth({ onLogin, onCustomerPreview }: AuthProps) {
+export default function Auth({ onLogin }: AuthProps) {
   const [mode, setMode] = useState<"login" | "register">("login");
 
   const [form, setForm] = useState<AuthForm>(initialForm);
@@ -49,6 +49,7 @@ export default function Auth({ onLogin, onCustomerPreview }: AuthProps) {
 
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
+  const [submitting, setSubmitting] = useState(false);
 
   const updateField = (field: keyof AuthForm, value: string | boolean) => {
     setForm((previous) => ({
@@ -68,7 +69,7 @@ export default function Auth({ onLogin, onCustomerPreview }: AuthProps) {
     setShowConfirmPassword(false);
   };
 
-  const handleLogin = (event: FormEvent<HTMLFormElement>) => {
+  const handleLogin = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
     setError("");
@@ -86,26 +87,21 @@ export default function Auth({ onLogin, onCustomerPreview }: AuthProps) {
       return;
     }
 
-    // DEMO ONLY:
-    // Replace this form-only check with the backend login API.
-    onLogin();
+    setSubmitting(true);
+    try {
+      onLogin(await authApi.login(email, form.password));
+    } catch (requestError) {
+      setError(apiErrorMessage(requestError));
+    } finally {
+      setSubmitting(false);
+    }
   };
 
-  const handleRegister = (event: FormEvent<HTMLFormElement>) => {
+  const handleRegister = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
     setError("");
     setMessage("");
-
-    if (!form.fullName.trim()) {
-      setError("Please enter your full name.");
-      return;
-    }
-
-    if (!form.company.trim()) {
-      setError("Please enter your business name.");
-      return;
-    }
 
     const email = form.email.trim().toLowerCase();
 
@@ -116,21 +112,6 @@ export default function Auth({ onLogin, onCustomerPreview }: AuthProps) {
 
     if (form.password.length < 8) {
       setError("Password must contain at least 8 characters.");
-      return;
-    }
-
-    if (!/[A-Z]/.test(form.password)) {
-      setError("Password must contain at least one uppercase letter.");
-      return;
-    }
-
-    if (!/[a-z]/.test(form.password)) {
-      setError("Password must contain at least one lowercase letter.");
-      return;
-    }
-
-    if (!/[0-9]/.test(form.password)) {
-      setError("Password must contain at least one number.");
       return;
     }
 
@@ -139,21 +120,15 @@ export default function Auth({ onLogin, onCustomerPreview }: AuthProps) {
       return;
     }
 
-    // Registration API will be connected during backend integration.
-    // Do not create an account or imply that it was saved here.
-
-    setForm((previous) => ({
-      ...previous,
-      email,
-      password: "",
-      confirmPassword: "",
-    }));
-
-    setMode("login");
-
-    setMessage(
-      "Form validation successful. Account creation will be enabled after backend integration. No account has been created yet."
-    );
+    setSubmitting(true);
+    try {
+      await authApi.register(email, form.password);
+      onLogin(await authApi.login(email, form.password));
+    } catch (requestError) {
+      setError(apiErrorMessage(requestError));
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const handleForgotPassword = () => {
@@ -370,7 +345,6 @@ export default function Auth({ onLogin, onCustomerPreview }: AuthProps) {
                       />
 
                       <input
-                        required
                         value={form.fullName}
                         onChange={(event) =>
                           updateField("fullName", event.target.value)
@@ -393,7 +367,6 @@ export default function Auth({ onLogin, onCustomerPreview }: AuthProps) {
                       />
 
                       <input
-                        required
                         value={form.company}
                         onChange={(event) =>
                           updateField("company", event.target.value)
@@ -582,33 +555,20 @@ export default function Auth({ onLogin, onCustomerPreview }: AuthProps) {
               {/* Submit */}
               <button
                 type="submit"
+                disabled={submitting}
                 className="flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-yellow-400 text-sm font-bold text-slate-900 shadow-sm transition hover:bg-yellow-500 active:scale-[0.99]"
               >
-                {mode === "login" ? "Sign In" : "Create Account"}
+                {submitting ? "Please wait…" : mode === "login" ? "Sign In" : "Create Account"}
 
                 <ArrowRight size={17} />
               </button>
             </form>
 
-            {/* Demo note */}
-            <div className="mt-6 rounded-lg border border-amber-100 bg-amber-50 px-3 py-3">
-              <p className="text-[10px] leading-relaxed text-amber-800">
-                <strong>Development mode:</strong> Login currently validates
-                the form and opens the dashboard without verifying credentials.
-                Registration is not yet connected to an account service.
+            <div className="mt-6 rounded-lg border border-blue-100 bg-blue-50 px-3 py-3">
+              <p className="text-[10px] leading-relaxed text-blue-800">
+                Sign in with a Billora account. New registrations are created as customer accounts.
               </p>
             </div>
-            {/* Customer Portal Preview */}
-            {mode === "login" && (
-                <button
-                    type="button"
-                    onClick={onCustomerPreview}
-                    className="mt-3 flex h-11 w-full items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
-                >
-                    <UserRound size={16} />
-                    Preview Customer Portal (Demo)
-                </button>
-            )}
 
             {/* Footer */}
             <div className="mt-8 border-t border-slate-100 pt-5 text-center"></div>

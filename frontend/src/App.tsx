@@ -1,19 +1,14 @@
 
 import Products from "./pages/Products";
 import Plans from "./pages/Plans";
-import Customers from "./pages/Customers";
 import Subscriptions from "./pages/Subscriptions";
-import Quotations from "./pages/Quotations";
 import Invoices from "./pages/Invoices";
 import Payments from "./pages/Payments";
-import Reports from "./pages/Reports";
-import Discounts from "./pages/Discounts";
-import Taxes from "./pages/Taxes";
-import Staff from "./pages/Staff";
-import SettingsPage from "./pages/Settings";
+import Reports, { DashboardAnalytics } from "./pages/Reports";
 import Auth from "./pages/auth/Auth";
 import CustomerPortal from "./pages/customer/CustomerPortal";
-import { useState, type LucideIcon } from "react";
+import { authApi, type CurrentUser } from "./api/client";
+import { useEffect, useState } from "react";
 import {
   LayoutDashboard,
   Package,
@@ -36,6 +31,7 @@ import {
   ArrowDownRight,
   Menu,
   X,
+  type LucideIcon,
 } from "lucide-react";
 
 import {
@@ -60,16 +56,10 @@ const navigation: NavItem[] = [
   { label: "Dashboard", icon: LayoutDashboard },
   { label: "Products", icon: Package },
   { label: "Plans", icon: CalendarDays },
-  { label: "Customers", icon: Users },
   { label: "Subscriptions", icon: Repeat },
-  { label: "Quotations", icon: FileText },
   { label: "Invoices", icon: Receipt },
   { label: "Payments", icon: CreditCard },
-  { label: "Discounts", icon: Percent },
-  { label: "Taxes", icon: Tags },
   { label: "Reports", icon: BarChart3 },
-  { label: "Staff", icon: UserCog },
-  { label: "Settings", icon: SettingsIcon },
 ];
 
 const revenueData = [
@@ -294,7 +284,7 @@ function StatCard({
   );
 }
 
-function DashboardContent() {
+function LegacyDashboardContent() {
   return (
     <div className="space-y-6">
       <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
@@ -521,6 +511,10 @@ function DashboardContent() {
   );
 }
 
+function DashboardContent() {
+  return <DashboardAnalytics />;
+}
+
 function ComingSoon({ title }: { title: string }) {
   return (
     <div className="flex min-h-[60vh] flex-col items-center justify-center rounded-xl border border-dashed border-slate-300 bg-white p-8 text-center">
@@ -536,23 +530,34 @@ function ComingSoon({ title }: { title: string }) {
 }
 
 export default function App() {
-  const [isDemoAuthenticated, setIsDemoAuthenticated] = useState(false);
-  const [isCustomerPreview, setIsCustomerPreview] = useState(false);
+  const [currentUser, setCurrentUser] = useState<CurrentUser | null>(() => authApi.storedUser());
   const [activePage, setActivePage] = useState("Dashboard");
   const [mobileOpen, setMobileOpen] = useState(false);
-if (isCustomerPreview) {
+  useEffect(() => {
+    if (!currentUser) return;
+    authApi.me().then(setCurrentUser).catch(() => {
+      authApi.logout();
+      setCurrentUser(null);
+    });
+  }, []);
+
+  const logout = () => {
+    authApi.logout();
+    setCurrentUser(null);
+  };
+
+if (currentUser?.role === "customer") {
     return (
       <CustomerPortal
-        onLogout={() => setIsCustomerPreview(false)}
+        onLogout={logout}
       />
     );
   }
 
-if (!isDemoAuthenticated) {
+if (!currentUser) {
   return (
     <Auth
-      onLogin={() => setIsDemoAuthenticated(true)}
-      onCustomerPreview={() => setIsCustomerPreview(true)}
+      onLogin={setCurrentUser}
     />
   );
 }
@@ -625,26 +630,14 @@ if (!isDemoAuthenticated) {
               <Products />
             ) : activePage === "Plans" ? (
               <Plans />
-            ) : activePage === "Customers" ?(
-              <Customers />
             ) : activePage === "Subscriptions" ?(
               <Subscriptions />
-            ) : activePage === "Quotations" ? (
-              <Quotations />
             ) : activePage === "Invoices" ? (
               <Invoices />
             ) : activePage === "Payments" ? (
               <Payments />
             ) : activePage === "Reports" ? (
               <Reports />
-            ) : activePage === "Discounts" ? (
-              <Discounts />
-            ) : activePage === "Taxes" ? (
-              <Taxes />
-            ) : activePage === "Staff" ? (
-              <Staff />
-            ) : activePage === "Settings" ? (
-              <SettingsPage />
             ) : (
               <ComingSoon title={activePage} />
             )}
