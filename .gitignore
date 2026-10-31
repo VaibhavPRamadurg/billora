@@ -1,0 +1,27 @@
+# Environment and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.venv/
+venv/
+env/
+
+# Node.js
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+
+# IDE and OS files
+.DS_Store
+.idea/
+.vscode/
+*.swp
